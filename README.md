@@ -15,6 +15,12 @@ A Rust terminal UI for browsing and previewing Oh My Posh themes with a live ANS
 - `oh-my-posh` installed and available in PATH.
 - Network access to GitHub for theme list and downloads.
 
+## Clone
+```bash
+git clone https://github.com/RayenBHK/posh-tui.git
+cd posh-tui
+```
+
 ## Install & Run
 ```bash
 cargo run

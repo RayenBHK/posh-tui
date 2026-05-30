@@ -34,6 +34,7 @@ async fn main() -> error::Result<()> {
     let mut term = Terminal::new(backend)?;
 
     let mut app = App::new(themes, cache_dir);
+    app.load_shell_info();
     let res = run_app(&mut term, &mut app).await;
 
     disable_raw_mode()?;
@@ -68,6 +69,19 @@ async fn run_app(
                     if matches!(key.code, KeyCode::Char('?') | KeyCode::Esc) {
                         app.mode = Mode::Normal;
                     }
+                }
+                Mode::SoftRevert => match key.code {
+                    KeyCode::Enter => app.do_soft_revert(),
+                    KeyCode::Esc   => app.mode = Mode::Normal,
+                    _              => {}
+                },
+                Mode::HardRevert => match key.code {
+                    KeyCode::Enter => app.do_hard_revert(),
+                    KeyCode::Esc   => app.mode = Mode::Normal,
+                    _              => {}
+                },
+                Mode::Message => {
+                    app.mode = Mode::Normal;
                 }
             },
             Event::Resize(_, _) => {
@@ -130,6 +144,16 @@ async fn handle_normal(app: &mut App, key: KeyCode, mods: KeyModifiers) {
             }
         }
 
+        KeyCode::Char('u') => app.do_undo(),
+
+        KeyCode::Char('U') => {
+            app.mode = Mode::SoftRevert;
+        }
+
+        KeyCode::Char('u') if mods.contains(KeyModifiers::CONTROL) => {
+            app.prepare_hard_revert();
+        }
+
         _ => {}
     }
 }
@@ -154,14 +178,9 @@ fn handle_search(app: &mut App, key: KeyCode) {
 
 fn handle_confirm(app: &mut App, key: KeyCode) {
     match key {
-        KeyCode::Enter => {
-            if let Some(t) = app.selected_theme() {
-                app.last_applied = Some(t.name.clone());
-            }
-            app.mode = Mode::Normal;
-        }
-        KeyCode::Esc => app.mode = Mode::Normal,
-        _ => {}
+        KeyCode::Enter => app.do_apply(),
+        KeyCode::Esc   => app.mode = Mode::Normal,
+        _              => {}
     }
 }
 

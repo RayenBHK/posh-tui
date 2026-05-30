@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use crate::themes::Theme;
 use crate::preview::PreviewWorker;
 use crate::search::FuzzySearch;
+use crate::shell::ShellInfo;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Mode {
@@ -10,6 +11,9 @@ pub enum Mode {
     Confirm,
     Help,
     Immersive,
+    SoftRevert,   // U — remove posh-tui block
+    HardRevert,   // Ctrl+U — remove all omp lines
+    Message,      // show result of an operation
 }
 
 pub struct App {
@@ -36,6 +40,10 @@ pub struct App {
     pub imm_history:      Vec<ImmLine>,
     pub imm_cursor_tick:  u8,
     pub fuzzy: FuzzySearch,
+    pub shell_info:      Option<ShellInfo>,
+    pub message:         String,   // shown in Message mode
+    pub message_is_err:  bool,
+    pub hard_revert_preview: Vec<(usize, String)>,
 }
 
 #[derive(Clone)]
@@ -78,6 +86,10 @@ impl App {
             imm_input: String::new(),
             imm_history: Vec::new(),
             imm_cursor_tick: 0,
+            shell_info: None,
+            message: String::new(),
+            message_is_err: false,
+            hard_revert_preview: Vec::new(),
         }
     }
 
@@ -286,6 +298,116 @@ impl App {
     pub fn tick(&mut self) {
         self.imm_cursor_tick = self.imm_cursor_tick.wrapping_add(1);
     }
+
+    pub fn load_shell_info(&mut self) {
+    match crate::shell::ShellInfo::load() {
+        Ok(info) => self.shell_info = Some(info),
+        Err(e)   => {
+            self.message       = format!("shell detection failed: {e}");
+            self.message_is_err = true;
+            self.mode          = Mode::Message;
+        }
+    }
+}
+
+    pub fn do_apply(&mut self) {
+        let Some(info) = &self.shell_info else { return };
+        let Some(theme) = self.selected_theme() else { return };
+        let theme_path  = self.cache_dir.join(&theme.filename);
+        let theme_name  = theme.name.clone();        // clone before borrow ends
+        let rc_path     = info.rc_path.display().to_string(); // clone before borrow ends
+
+        match crate::shell::apply_theme(
+            self.shell_info.as_ref().unwrap(),
+            &theme_path,
+        ) {
+            Ok(_) => {
+                self.last_applied   = Some(theme_name.clone());
+                self.message        = format!(
+                    "✓ applied {}  →  {}\n\nopen a new terminal to see it.\npress u to undo.",
+                    theme_name,
+                    rc_path,
+                );
+                self.message_is_err = false;
+                self.load_shell_info();
+            }
+            Err(e) => {
+                self.message        = format!("✗ apply failed: {e}");
+                self.message_is_err = true;
+            }
+        }
+        self.mode = Mode::Message;
+    }
+
+    pub fn do_undo(&mut self) {
+        let Some(info) = &self.shell_info else { return };
+        match crate::shell::undo(info) {
+            Ok(_) => {
+                self.message        = format!(
+                    "✓ restored backup\n→ {}",
+                    info.backup_path.display()
+                );
+                self.message_is_err = false;
+                self.load_shell_info();
+            }
+            Err(e) => {
+                self.message        = format!("✗ undo failed: {e}");
+                self.message_is_err = true;
+            }
+        }
+        self.mode = Mode::Message;
+    }
+
+    pub fn do_soft_revert(&mut self) {
+        let Some(info) = &self.shell_info else { return };
+        match crate::shell::soft_revert(info) {
+            Ok(_) => {
+                self.message        = "✓ removed posh-tui block from rc file\n\nopen a new terminal to see default prompt.".into();
+                self.message_is_err = false;
+                self.load_shell_info();
+            }
+            Err(e) => {
+                self.message        = format!("✗ revert failed: {e}");
+                self.message_is_err = true;
+            }
+        }
+        self.mode = Mode::Message;
+    }
+
+    pub fn do_hard_revert(&mut self) {
+        let Some(info) = &self.shell_info else { return };
+        match crate::shell::hard_revert(info) {
+            Ok(n) => {
+                self.message        = format!(
+                    "✓ removed {n} oh-my-posh line(s) from {}\n\nopen a new terminal to see default prompt.",
+                    info.rc_path.display()
+                );
+                self.message_is_err = false;
+                self.load_shell_info();
+            }
+            Err(e) => {
+                self.message        = format!("✗ hard revert failed: {e}");
+                self.message_is_err = true;
+            }
+        }
+        self.mode = Mode::Message;
+    }
+
+    pub fn prepare_hard_revert(&mut self) {
+        let Some(info) = &self.shell_info else { return };
+        match crate::shell::hard_revert_preview(info) {
+            Ok(lines) => {
+                self.hard_revert_preview = lines;
+                self.mode = Mode::HardRevert;
+            }
+            Err(e) => {
+                self.message        = format!("✗ {e}");
+                self.message_is_err = true;
+                self.mode           = Mode::Message;
+            }
+        }
+    }
+
 }
 
 fn fake_command_output(cmd: &str) -> Vec<String> {

@@ -114,8 +114,9 @@ fn draw_preview(frame: &mut Frame, app: &App, area: Rect) {
         format!(" zoom {:.0}% ", (100.0 / app.zoom_factor) as u16)
     };
 
-    let title = format!("{theme_name}{zoom_label}");
-    let block = Block::default().borders(Borders::ALL).title(title);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!("{theme_name}{zoom_label}"));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -136,35 +137,55 @@ fn draw_preview(frame: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
+    let offset = app.scroll_offset as usize;
     let text   = ansi_to_text(&app.preview_output);
-    let offset = app.scroll_offset;
 
-    // apply horizontal scroll by slicing each line
+    // scroll by skipping N chars worth of spans per line — preserves styling
     let scrolled: Vec<Line> = text.lines.into_iter().map(|line| {
-        let full: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-        let chars: Vec<char> = full.chars().collect();
-        let start = (offset as usize).min(chars.len());
-        let visible_str: String = chars[start..].iter().collect();
+        let mut remaining_skip = offset;
+        let mut new_spans: Vec<Span<'static>> = Vec::new();
 
-        // re-parse the sliced string with styles preserved best-effort
-        Line::from(Span::raw(visible_str))
+        for span in line.spans {
+            let content = span.content.to_string();
+            let char_count = content.chars().count();
+
+            if remaining_skip >= char_count {
+                // skip entire span
+                remaining_skip -= char_count;
+            } else if remaining_skip > 0 {
+                // partial skip — take chars after the offset
+                let visible: String = content.chars().skip(remaining_skip).collect();
+                remaining_skip = 0;
+                if !visible.is_empty() {
+                    new_spans.push(Span::styled(visible, span.style));
+                }
+            } else {
+                // no skip needed — take whole span
+                new_spans.push(Span::styled(content, span.style));
+            }
+        }
+
+        Line::from(new_spans)
     }).collect();
 
     let para = Paragraph::new(Text::from(scrolled))
         .wrap(Wrap { trim: false });
     frame.render_widget(para, inner);
 
-    // scroll indicator
+    // scroll position indicator
     if offset > 0 {
-        let indicator = Paragraph::new(format!(" ◀ {offset}"))
-            .style(Style::default().fg(Color::DarkGray));
+        let label = format!(" ◀ +{offset} ");
         let ind_area = Rect {
             x: inner.x,
             y: inner.y,
-            width: (format!(" ◀ {offset}").len() as u16).min(inner.width),
+            width: (label.len() as u16).min(inner.width),
             height: 1,
         };
-        frame.render_widget(indicator, ind_area);
+        frame.render_widget(
+            Paragraph::new(label)
+                .style(Style::default().fg(Color::DarkGray)),
+            ind_area,
+        );
     }
 }
 
@@ -173,96 +194,125 @@ fn draw_immersive(frame: &mut Frame, app: &mut App) {
     app.terminal_width = area.width;
 
     // full black background
-    let bg = Block::default()
-        .style(Style::default().bg(Color::Black));
-    frame.render_widget(bg, area);
-
-    // header bar
-    let theme_name = app.selected_theme()
-        .map(|t| t.name.as_str())
-        .unwrap_or("unknown");
-    let header_text = format!(
-        " immersive preview — {}   Esc: back · Enter: apply · type commands to test",
-        theme_name
+    frame.render_widget(
+        Block::default().style(Style::default().bg(Color::Black)),
+        area,
     );
-    let header = Paragraph::new(header_text)
-        .style(Style::default().fg(Color::DarkGray).bg(Color::Black));
-    let header_area = Rect { x: area.x, y: area.y, width: area.width, height: 1 };
-    frame.render_widget(header, header_area);
 
-    // shell area — everything below header, above input line
-    let shell_area = Rect {
-        x: area.x,
-        y: area.y + 1,
-        width: area.width,
-        height: area.height.saturating_sub(3),
+    // top hint bar — 1 line
+    let theme_name = app.selected_theme()
+        .map(|t| t.name.clone())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let hint = Line::from(vec![
+        Span::styled(" immersive — ", Style::default().fg(Color::DarkGray).bg(Color::Black)),
+        Span::styled(&*theme_name, Style::default().fg(Color::Green).bg(Color::Black)),
+        Span::styled("   Esc: back", Style::default().fg(Color::DarkGray).bg(Color::Black)),
+        Span::styled("   Ctrl+A: apply", Style::default().fg(Color::Yellow).bg(Color::Black)),
+        Span::styled("   Enter: run command", Style::default().fg(Color::DarkGray).bg(Color::Black)),
+        Span::styled("   type 'help' for commands", Style::default().fg(Color::DarkGray).bg(Color::Black)),
+    ]);
+    let hint_area = Rect { x: area.x, y: area.y, width: area.width, height: 1 };
+    frame.render_widget(
+        Paragraph::new(hint).style(Style::default().bg(Color::Black)),
+        hint_area,
+    );
+
+    // separator under hint
+    let sep1_area = Rect { x: area.x, y: area.y + 1, width: area.width, height: 1 };
+    frame.render_widget(
+        Paragraph::new("─".repeat(area.width as usize))
+            .style(Style::default().fg(Color::DarkGray).bg(Color::Black)),
+        sep1_area,
+    );
+
+    // input line pinned at very bottom
+    let cursor_char = if app.imm_cursor_tick < 30 { "█" } else { " " };
+    let input_line  = format!("❯ {}{}", app.imm_input, cursor_char);
+    let input_area  = Rect {
+        x:      area.x,
+        y:      area.y + area.height.saturating_sub(1),
+        width:  area.width,
+        height: 1,
+    };
+    frame.render_widget(
+        Paragraph::new(input_line)
+            .style(Style::default().fg(Color::Green).bg(Color::Black)),
+        input_area,
+    );
+
+    // separator above input
+    let sep2_area = Rect {
+        x:      area.x,
+        y:      area.y + area.height.saturating_sub(2),
+        width:  area.width,
+        height: 1,
+    };
+    frame.render_widget(
+        Paragraph::new("─".repeat(area.width as usize))
+            .style(Style::default().fg(Color::DarkGray).bg(Color::Black)),
+        sep2_area,
+    );
+
+    // shell history area — between the two separators
+    let history_area = Rect {
+        x:      area.x,
+        y:      area.y + 2,
+        width:  area.width,
+        height: area.height.saturating_sub(4), // hint + sep1 + sep2 + input
     };
 
-    // collect all lines to render
-    let mut all_lines: Vec<Line> = Vec::new();
+    // build all lines from history
+    let mut all_lines: Vec<Line<'static>> = Vec::new();
 
     for entry in &app.imm_history {
         match entry.kind {
             ImmKind::Prompt => {
+                // render the actual oh-my-posh ANSI prompt
                 let parsed = ansi_to_text(&entry.content);
                 for line in parsed.lines {
                     all_lines.push(line);
                 }
             }
             ImmKind::Input => {
+                // show what was typed, indented with a dim arrow
                 all_lines.push(Line::from(vec![
-                    Span::styled("❯ ", Style::default().fg(Color::Green)),
-                    Span::raw(entry.content.clone()),
+                    Span::styled("❯ ", Style::default().fg(Color::Green).bg(Color::Black)),
+                    Span::styled(
+                        entry.content.clone(),
+                        Style::default().fg(Color::White).bg(Color::Black),
+                    ),
                 ]));
             }
             ImmKind::Output => {
+                // parse ANSI in output too (ls colors, git colors etc.)
                 let parsed = ansi_to_text(&entry.content);
                 for line in parsed.lines {
-                    all_lines.push(line);
+                    // ensure bg is black
+                    let styled: Vec<Span<'static>> = line.spans.into_iter().map(|s| {
+                        Span::styled(s.content, s.style.bg(Color::Black))
+                    }).collect();
+                    all_lines.push(Line::from(styled));
                 }
             }
             ImmKind::Blank => {
-                all_lines.push(Line::from(""));
+                all_lines.push(Line::from(
+                    Span::raw("").style(Style::default().bg(Color::Black))
+                ));
             }
         }
     }
 
-    // scroll so latest lines are always visible
-    let visible_height = shell_area.height as usize;
-    let skip = if all_lines.len() > visible_height {
-        all_lines.len() - visible_height
-    } else {
-        0
-    };
-    let visible_lines: Vec<Line> = all_lines.into_iter().skip(skip).collect();
+    // always scroll to show latest lines — like a real terminal
+    let visible_h = history_area.height as usize;
+    let skip = all_lines.len().saturating_sub(visible_h);
+    let visible: Vec<Line<'static>> = all_lines.into_iter().skip(skip).collect();
 
-    let shell_para = Paragraph::new(Text::from(visible_lines))
-        .style(Style::default().fg(Color::White).bg(Color::Black));
-    frame.render_widget(shell_para, shell_area);
-
-    // input line at bottom
-    let cursor_char = if app.imm_cursor_tick < 30 { "█" } else { " " };
-    let input_line = format!("❯ {}{}", app.imm_input, cursor_char);
-    let input_area = Rect {
-        x: area.x,
-        y: area.y + area.height.saturating_sub(2),
-        width: area.width,
-        height: 1,
-    };
-    let input_widget = Paragraph::new(input_line)
-        .style(Style::default().fg(Color::Green).bg(Color::Black));
-    frame.render_widget(input_widget, input_area);
-
-    // thin separator above input
-    let sep_area = Rect {
-        x: area.x,
-        y: area.y + area.height.saturating_sub(3),
-        width: area.width,
-        height: 1,
-    };
-    let sep = Paragraph::new("─".repeat(area.width as usize))
-        .style(Style::default().fg(Color::DarkGray).bg(Color::Black));
-    frame.render_widget(sep, sep_area);
+    frame.render_widget(
+        Paragraph::new(Text::from(visible))
+            .style(Style::default().fg(Color::White).bg(Color::Black)),
+        history_area,
+    );
 }
 
 fn draw_statusbar(frame: &mut Frame, app: &App, area: Rect) {

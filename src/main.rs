@@ -63,7 +63,7 @@ async fn run_app(
                 Mode::Normal    => handle_normal(app, key.code, key.modifiers).await,
                 Mode::Search    => handle_search(app, key.code),
                 Mode::Confirm   => handle_confirm(app, key.code),
-                Mode::Immersive => handle_immersive(app, key.code).await,
+                Mode::Immersive => handle_immersive(app, key.code, key.modifiers).await,
                 Mode::Help      => {
                     if matches!(key.code, KeyCode::Char('?') | KeyCode::Esc) {
                         app.mode = Mode::Normal;
@@ -165,20 +165,32 @@ fn handle_confirm(app: &mut App, key: KeyCode) {
     }
 }
 
-async fn handle_immersive(app: &mut App, key: KeyCode) {
+async fn handle_immersive(app: &mut App, key: KeyCode, mods: KeyModifiers) {
     match key {
+        // Esc — back to browser
         KeyCode::Esc => {
             app.mode = Mode::Normal;
             app.imm_history.clear();
             app.imm_input.clear();
         }
-        KeyCode::Enter => {
+
+        // Ctrl+A — apply theme
+        KeyCode::Char('a') if mods.contains(KeyModifiers::CONTROL) => {
             if app.selected_theme().is_some() {
                 app.mode = Mode::Confirm;
             }
         }
+
+        // Enter — run the fake command
+        KeyCode::Enter => {
+            app.imm_submit();
+        }
+
         KeyCode::Backspace => app.imm_backspace(),
-        KeyCode::Char(c)   => app.imm_push(c),
+
+        // any printable char — add to input buffer
+        KeyCode::Char(c) => app.imm_push(c),
+
         _ => {}
     }
 }

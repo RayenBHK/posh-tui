@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use crate::themes::Theme;
 use crate::preview::PreviewWorker;
+use crate::search::FuzzySearch;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Mode {
@@ -34,6 +35,7 @@ pub struct App {
     pub imm_input:        String,
     pub imm_history:      Vec<ImmLine>,
     pub imm_cursor_tick:  u8,
+    pub fuzzy: FuzzySearch,
 }
 
 #[derive(Clone)]
@@ -53,6 +55,7 @@ pub enum ImmKind {
 impl App {
     pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
         let filtered = (0..themes.len()).collect();
+        let theme_names: Vec<String> = themes.iter().map(|t| t.name.clone()).collect();
         Self {
             themes,
             filtered,
@@ -67,6 +70,7 @@ impl App {
             should_quit: false,
             cache_dir,
             worker: PreviewWorker::spawn(),
+            fuzzy: FuzzySearch::new(theme_names),
             preview_width: 80,
             terminal_width: 80,
             scroll_offset: 0,
@@ -143,20 +147,27 @@ impl App {
 
     pub fn apply_search(&mut self, query: &str) {
         self.search_query = query.to_string();
-        let q = query.to_lowercase();
-        self.filtered = self.themes
+
+        let matches = self.fuzzy.query(query);
+
+        // map fuzzy results back to indices into self.themes
+        self.filtered = matches
             .iter()
-            .enumerate()
-            .filter(|(_, t)| t.name.to_lowercase().contains(&q))
-            .map(|(i, _)| i)
+            .filter_map(|name| self.themes.iter().position(|t| &t.name == name))
             .collect();
+
         self.selected = 0;
         self.scroll_offset = 0;
     }
 
     pub fn clear_search(&mut self) {
         self.search_query.clear();
-        self.filtered = (0..self.themes.len()).collect();
+        // empty query returns all themes sorted
+        let matches = self.fuzzy.query("");
+        self.filtered = matches
+            .iter()
+            .filter_map(|name| self.themes.iter().position(|t| &t.name == name))
+            .collect();
         self.selected = 0;
         self.scroll_offset = 0;
     }
@@ -203,18 +214,17 @@ impl App {
         if !dest.exists() {
             let _ = crate::themes::download_theme(&theme, &self.cache_dir).await;
         }
-        // render at full terminal width — fully accurate
-        self.worker.request(dest, self.terminal_width).await;
         self.imm_history.clear();
         self.imm_input.clear();
+        // render at true full terminal width
+        self.worker.request(dest, self.terminal_width.saturating_sub(2)).await;
     }
 
     pub async fn poll_preview(&mut self) {
         if let Some(out) = self.worker.take_output().await {
-            self.preview_output = out.clone();
+            self.preview_output  = out.clone();
             self.preview_loading = false;
 
-            // if we're in immersive mode, seed the first prompt line
             if self.mode == Mode::Immersive && self.imm_history.is_empty() {
                 self.imm_history.push(ImmLine {
                     kind:    ImmKind::Prompt,
@@ -226,20 +236,44 @@ impl App {
 
     // called in immersive mode when user presses Enter
     pub fn imm_submit(&mut self) {
-        let input = self.imm_input.trim().to_lowercase();
-        let input_display = self.imm_input.clone();
+        let input = self.imm_input.trim().to_string();
         self.imm_input.clear();
 
-        // record what was typed
-        self.imm_history.push(ImmLine { kind: ImmKind::Input,  content: input_display.clone() });
-
-        // fake output
-        let output = fake_command_output(&input);
-        for line in output {
-            self.imm_history.push(ImmLine { kind: ImmKind::Output, content: line });
+        if input.is_empty() {
+            // blank enter — just add a new prompt
+            self.imm_history.push(ImmLine {
+                kind:    ImmKind::Prompt,
+                content: self.preview_output.clone(),
+            });
+            return;
         }
 
-        // add next prompt
+        // find the last prompt in history and replace it with:
+        // prompt → typed input → output → new prompt
+        // this way it reads top-to-bottom like a real shell
+
+        // 1. record the typed command on the last prompt line
+        self.imm_history.push(ImmLine {
+            kind:    ImmKind::Input,
+            content: input.clone(),
+        });
+
+        // 2. fake output
+        let cmd = input.to_lowercase();
+        let output_lines = fake_command_output(&cmd);
+
+        if cmd == "clear" {
+            self.imm_history.clear();
+        } else {
+            for line in output_lines {
+                self.imm_history.push(ImmLine {
+                    kind:    ImmKind::Output,
+                    content: line,
+                });
+            }
+        }
+
+        // 3. new prompt ready for next command
         self.imm_history.push(ImmLine {
             kind:    ImmKind::Prompt,
             content: self.preview_output.clone(),

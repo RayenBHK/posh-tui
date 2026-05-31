@@ -7,6 +7,7 @@ pub enum PoshError {
     Json(serde_json::Error),
     Toml(toml::de::Error),
     TomlSer(toml::ser::Error),
+    #[allow(dead_code)]
     Preview(String),
     Shell(String),
     Config(String),

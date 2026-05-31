@@ -6,6 +6,7 @@ use crate::error::Result;
 #[derive(Debug)]
 pub enum PreviewMsg {
     Load(PathBuf, u16),  // path + terminal width
+    #[allow(dead_code)]
     Quit,
 }
 

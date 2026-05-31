@@ -49,6 +49,7 @@ pub struct App {
     pub config: Config,
     pub loading:    bool,
     pub refreshing: bool,
+    #[allow(dead_code)]
     pub refresh_tx: Option<tokio::sync::mpsc::Sender<Vec<Theme>>>,
     pub refresh_rx: Option<tokio::sync::mpsc::Receiver<Vec<Theme>>>,
 }
@@ -64,6 +65,7 @@ pub enum ImmKind {
     Prompt,   // the oh-my-posh rendered prompt line
     Input,    // what the user typed
     Output,   // fake command output
+    #[allow(dead_code)]
     Blank,
 }
 

@@ -74,6 +74,7 @@ pub struct ShellInfo {
     pub shell:       Shell,
     pub rc_path:     PathBuf,
     pub has_managed: bool,   // posh-tui:start block exists
+    #[allow(dead_code)]
     pub has_any_omp: bool,   // any oh-my-posh line exists (for hard revert)
     pub backup_path: PathBuf,
 }

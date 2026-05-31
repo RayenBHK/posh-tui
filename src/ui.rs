@@ -49,7 +49,7 @@ fn draw_search(frame: &mut Frame, app: &App, area: Rect) {
         None       => String::new(),
     };
 
-    let title = if app.show_favs {
+    let _title = if app.show_favs {
         format!(" ★ favourites{fav_indicator} ")
     } else {
         format!(" posh-tui{fav_indicator}  {applied_label}")

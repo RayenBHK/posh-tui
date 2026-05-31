@@ -5,6 +5,7 @@ use crate::search::FuzzySearch;
 use crate::shell::ShellInfo;
 use crate::config::Config;
 
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Mode {
     Normal,
@@ -46,6 +47,10 @@ pub struct App {
     pub message_is_err:  bool,
     pub hard_revert_preview: Vec<(usize, String)>,
     pub config: Config,
+    pub loading:    bool,
+    pub refreshing: bool,
+    pub refresh_tx: Option<tokio::sync::mpsc::Sender<Vec<Theme>>>,
+    pub refresh_rx: Option<tokio::sync::mpsc::Receiver<Vec<Theme>>>,
 }
 
 #[derive(Clone)]
@@ -105,6 +110,10 @@ pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
         message_is_err: false,
         hard_revert_preview: Vec::new(),
         config,
+        loading:    false,
+        refreshing: false,
+        refresh_tx: None,
+        refresh_rx: None,
     }
 }
 
@@ -277,6 +286,60 @@ pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
         }
     }
 
+    // called once background fetch completes
+    pub fn init_themes(&mut self, list: Vec<Theme>) {
+        let theme_names: Vec<String> = list.iter().map(|t| t.name.clone()).collect();
+        self.fuzzy   = crate::search::FuzzySearch::new(theme_names);
+        self.filtered = (0..list.len()).collect();
+        self.themes  = list;
+        self.loading = false;
+
+        // restore cursor to last applied
+        if let Some(name) = &self.last_applied.clone() {
+            if let Some(pos) = self.themes.iter().position(|t| &t.name == name) {
+                self.selected = pos;
+            }
+        }
+    }
+
+    // r key — re-fetch from GitHub
+    pub fn start_refresh(&mut self) {
+        if self.refreshing { return; }
+        self.refreshing     = true;
+        self.preview_output.clear();
+
+        let (tx, rx) = tokio::sync::mpsc::channel::<Vec<Theme>>(1);
+        self.refresh_rx = Some(rx);
+
+        tokio::spawn(async move {
+            if let Ok(list) = crate::themes::fetch_theme_list().await {
+                let _ = tx.send(list).await;
+            }
+        });
+    }
+
+    pub async fn poll_refresh(&mut self) {
+        if !self.refreshing { return; }
+        let done = if let Some(rx) = &mut self.refresh_rx {
+            match rx.try_recv() {
+                Ok(list) => { self.init_themes(list); Some(true) }
+                Err(_)   => None,
+            }
+        } else { None };
+
+        if done.is_some() {
+            self.refreshing = false;
+            self.refresh_rx = None;
+            self.message        = format!("✓ refreshed — {} themes loaded", self.themes.len());
+            self.message_is_err = false;
+            self.mode           = Mode::Message;
+        }
+    }
+
+    pub fn tick(&mut self) {
+        self.imm_cursor_tick = self.imm_cursor_tick.wrapping_add(1);
+    }
+
     // called in immersive mode when user presses Enter
     pub fn imm_submit(&mut self) {
         let input = self.imm_input.trim().to_string();
@@ -325,10 +388,6 @@ pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
 
     pub fn imm_backspace(&mut self) { self.imm_input.pop(); }
     pub fn imm_push(&mut self, c: char) { self.imm_input.push(c); }
-
-    pub fn tick(&mut self) {
-        self.imm_cursor_tick = self.imm_cursor_tick.wrapping_add(1);
-    }
 
     pub fn load_shell_info(&mut self) {
     match crate::shell::ShellInfo::load() {

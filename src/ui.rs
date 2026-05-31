@@ -69,6 +69,16 @@ fn draw_search(frame: &mut Frame, app: &App, area: Rect) {
         Style::default().fg(Color::DarkGray)
     };
 
+    let title = if app.loading {
+    " posh-tui — loading... ".to_string()
+    } else if app.refreshing {
+        " posh-tui — refreshing... ".to_string()
+    } else if app.show_favs {
+        format!(" ★ favourites{fav_indicator} ")
+    } else {
+        format!(" posh-tui{fav_indicator}  {applied_label}")
+    };
+
     frame.render_widget(
         Paragraph::new(query)
             .style(style)
@@ -95,6 +105,24 @@ fn draw_main(frame: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn draw_list(frame: &mut Frame, app: &App, area: Rect) {
+    // show spinner while loading
+    if app.loading || app.refreshing {
+        let spinner_frames = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"];
+        let frame_idx = (app.imm_cursor_tick as usize / 3) % spinner_frames.len();
+        let spinner   = spinner_frames[frame_idx];
+        let label     = if app.refreshing { "refreshing..." } else { "loading themes..." };
+
+        let block = Block::default().borders(Borders::ALL).title(" themes ");
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+        frame.render_widget(
+            Paragraph::new(format!("\n  {spinner} {label}"))
+                .style(Style::default().fg(Color::Yellow)),
+            inner,
+        );
+        return;
+    }
+
     let visible = app.visible_themes();
     let total   = visible.len();
 
@@ -346,7 +374,7 @@ fn draw_immersive(frame: &mut Frame, app: &mut App) {
 fn draw_statusbar(frame: &mut Frame, app: &App, area: Rect) {
     let text = match app.mode {
         Mode::Search  => " Esc: cancel  ↑↓: navigate",
-        Mode::Normal  => " Space: preview  p: immersive  Enter: apply  u: undo  U: revert  Ctrl+U: hard revert  /: search  ?: help  q: quit",
+        Mode::Normal  => " Space: preview  p: immersive  Enter: apply  u: undo  U: revert  Ctrl+U: hard revert  r: refresh  /: search  ?: help  q: quit",
         Mode::Confirm => " Enter: confirm  Esc: cancel",
         Mode::Help    => " ?: close",
         Mode::Message => " any key: close",
@@ -381,7 +409,7 @@ fn draw_help(frame: &mut Frame, area: Rect) {
         Line::from(vec![Span::styled(" f          ", Style::default().fg(Color::Cyan)),  Span::raw("toggle favourite")]),
         Line::from(vec![Span::styled(" F          ", Style::default().fg(Color::Cyan)),  Span::raw("favourites view")]),
         Line::from(vec![Span::styled(" /          ", Style::default().fg(Color::Cyan)),  Span::raw("search themes")]),
-        Line::from(vec![Span::styled(" r          ", Style::default().fg(Color::Cyan)),  Span::raw("refresh from GitHub")]),
+        Line::from(vec![Span::styled(" r          ", Style::default().fg(Color::Cyan)),  Span::raw("refresh theme list from GitHub")]),
         Line::from(""),
         Line::from(vec![Span::styled(" ?          ", Style::default().fg(Color::DarkGray)), Span::raw("toggle help")]),
         Line::from(vec![Span::styled(" q / Ctrl+C ", Style::default().fg(Color::DarkGray)), Span::raw("quit")]),

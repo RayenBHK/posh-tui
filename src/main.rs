@@ -15,27 +15,43 @@ use crossterm::{
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::{io, path::PathBuf, time::Duration};
+use tokio::sync::mpsc;
+
+#[derive(Debug)]
+pub enum AppEvent {
+    ThemesLoaded(Vec<themes::Theme>),
+    ThemeLoadError(String),
+}
 
 #[tokio::main]
 async fn main() -> error::Result<()> {
-    println!("Fetching themes...");
-    let themes = themes::fetch_theme_list().await?;
-
     let cache_dir = dirs_next::cache_dir()
         .unwrap_or_else(|| PathBuf::from(".cache"))
         .join("posh-tui")
         .join("themes");
     std::fs::create_dir_all(&cache_dir)?;
 
+    // open TUI immediately — don't wait for themes
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend  = CrosstermBackend::new(stdout);
     let mut term = Terminal::new(backend)?;
 
-    let mut app = App::new(themes, cache_dir);
+    // start fetching themes in background
+    let (event_tx, mut event_rx) = mpsc::channel::<AppEvent>(4);
+    tokio::spawn(async move {
+        match themes::fetch_theme_list().await {
+            Ok(list) => { let _ = event_tx.send(AppEvent::ThemesLoaded(list)).await; }
+            Err(e)   => { let _ = event_tx.send(AppEvent::ThemeLoadError(e.to_string())).await; }
+        }
+    });
+
+    let mut app = App::new(vec![], cache_dir);
+    app.loading  = true;
     app.load_shell_info();
-    let res = run_app(&mut term, &mut app).await;
+
+    let res = run_app(&mut term, &mut app, &mut event_rx).await;
 
     disable_raw_mode()?;
     execute!(term.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
@@ -46,11 +62,28 @@ async fn main() -> error::Result<()> {
 }
 
 async fn run_app(
-    term: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    app:  &mut App,
+    term:     &mut Terminal<CrosstermBackend<io::Stdout>>,
+    app:      &mut App,
+    event_rx: &mut mpsc::Receiver<AppEvent>,
 ) -> error::Result<()> {
     loop {
+        // check for background events (theme load completing)
+        if let Ok(evt) = event_rx.try_recv() {
+            match evt {
+                AppEvent::ThemesLoaded(list) => {
+                    app.init_themes(list);
+                }
+                AppEvent::ThemeLoadError(e) => {
+                    app.loading       = false;
+                    app.message       = format!("failed to fetch themes: {e}\n\ncheck your internet connection.\npress r to retry.");
+                    app.message_is_err = true;
+                    app.mode          = Mode::Message;
+                }
+            }
+        }
+
         app.poll_preview().await;
+        app.poll_refresh().await;
         app.tick();
 
         term.draw(|f| ui::draw(f, app))?;
@@ -80,9 +113,7 @@ async fn run_app(
                     KeyCode::Esc   => app.mode = Mode::Normal,
                     _              => {}
                 },
-                Mode::Message => {
-                    app.mode = Mode::Normal;
-                }
+                Mode::Message => { app.mode = Mode::Normal; }
             },
             Event::Resize(_, _) => {
                 term.autoresize()?;
@@ -100,6 +131,14 @@ async fn run_app(
 }
 
 async fn handle_normal(app: &mut App, key: KeyCode, mods: KeyModifiers) {
+    // block navigation until themes are loaded
+    if app.loading {
+        if key == KeyCode::Char('q') {
+            app.should_quit = true;
+        }
+        return;
+    }
+
     match key {
         KeyCode::Char('q') => app.should_quit = true,
         KeyCode::Char('c') if mods.contains(KeyModifiers::CONTROL) => app.should_quit = true,
@@ -113,46 +152,31 @@ async fn handle_normal(app: &mut App, key: KeyCode, mods: KeyModifiers) {
 
         KeyCode::Char('<') => app.scroll_left(),
         KeyCode::Char('>') => app.scroll_right(),
-        KeyCode::Char('-') => {
-            app.zoom_out();
-            app.trigger_preview().await;
-        }
-        KeyCode::Char('=') => {
-            app.zoom_in();
-            app.trigger_preview().await;
-        }
-        KeyCode::Char('0') => {
-            app.zoom_reset();
-            app.trigger_preview().await;
-        }
+        KeyCode::Char('-') => { app.zoom_out(); app.trigger_preview().await; }
+        KeyCode::Char('=') => { app.zoom_in();  app.trigger_preview().await; }
+        KeyCode::Char('0') => { app.zoom_reset(); app.trigger_preview().await; }
 
         KeyCode::Char('/') => app.mode = Mode::Search,
         KeyCode::Char('?') => app.mode = Mode::Help,
         KeyCode::Char('f') => app.toggle_favourite(),
         KeyCode::Char('F') => app.show_favs = !app.show_favs,
+        KeyCode::Char('r') => app.start_refresh(),
 
         KeyCode::Char(' ') => app.trigger_preview().await,
-
         KeyCode::Char('p') => {
             app.mode = Mode::Immersive;
             app.trigger_immersive_preview().await;
         }
-
         KeyCode::Enter => {
             if app.selected_theme().is_some() {
                 app.mode = Mode::Confirm;
             }
         }
-
-        KeyCode::Char('u') => app.do_undo(),
-
-        KeyCode::Char('U') => {
-            app.mode = Mode::SoftRevert;
-        }
-
         KeyCode::Char('u') if mods.contains(KeyModifiers::CONTROL) => {
             app.prepare_hard_revert();
         }
+        KeyCode::Char('U') => app.mode = Mode::SoftRevert,
+        KeyCode::Char('u') => app.do_undo(),
 
         _ => {}
     }
@@ -186,30 +210,19 @@ fn handle_confirm(app: &mut App, key: KeyCode) {
 
 async fn handle_immersive(app: &mut App, key: KeyCode, mods: KeyModifiers) {
     match key {
-        // Esc — back to browser
         KeyCode::Esc => {
             app.mode = Mode::Normal;
             app.imm_history.clear();
             app.imm_input.clear();
         }
-
-        // Ctrl+A — apply theme
         KeyCode::Char('a') if mods.contains(KeyModifiers::CONTROL) => {
             if app.selected_theme().is_some() {
                 app.mode = Mode::Confirm;
             }
         }
-
-        // Enter — run the fake command
-        KeyCode::Enter => {
-            app.imm_submit();
-        }
-
+        KeyCode::Enter     => app.imm_submit(),
         KeyCode::Backspace => app.imm_backspace(),
-
-        // any printable char — add to input buffer
-        KeyCode::Char(c) => app.imm_push(c),
-
+        KeyCode::Char(c)   => app.imm_push(c),
         _ => {}
     }
 }

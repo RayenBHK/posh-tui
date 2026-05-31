@@ -36,6 +36,8 @@ A terminal UI for browsing, previewing, and applying [Oh My Posh](https://ohmypo
 curl -sSf https://raw.githubusercontent.com/RayenBHK/posh-tui/main/install.sh | bash
 ```
 
+Installs the latest release binary to `~/.local/bin/posh-tui`.
+
 ### cargo
 
 ```bash

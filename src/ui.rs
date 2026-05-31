@@ -38,7 +38,23 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 }
 
 fn draw_search(frame: &mut Frame, app: &App, area: Rect) {
-    let title = if app.show_favs { " ★ favourites " } else { " posh-tui " };
+    let is_fav = app.selected_theme()
+        .map(|t| app.favourites.contains(&t.name))
+        .unwrap_or(false);
+
+    let fav_indicator = if is_fav { " ★" } else { "" };
+
+    let applied_label = match &app.last_applied {
+        Some(name) => format!(" applied: {name} "),
+        None       => String::new(),
+    };
+
+    let title = if app.show_favs {
+        format!(" ★ favourites{fav_indicator} ")
+    } else {
+        format!(" posh-tui{fav_indicator}  {applied_label}")
+    };
+
     let query = if app.mode == Mode::Search {
         format!("/ {}_", app.search_query)
     } else if app.search_query.is_empty() {
@@ -53,10 +69,12 @@ fn draw_search(frame: &mut Frame, app: &App, area: Rect) {
         Style::default().fg(Color::DarkGray)
     };
 
-    let block = Paragraph::new(query)
-        .style(style)
-        .block(Block::default().borders(Borders::ALL).title(title));
-    frame.render_widget(block, area);
+    frame.render_widget(
+        Paragraph::new(query)
+            .style(style)
+            .block(Block::default().borders(Borders::ALL).title(title)),
+        area,
+    );
 }
 
 fn draw_main(frame: &mut Frame, app: &mut App, area: Rect) {
@@ -83,8 +101,12 @@ fn draw_list(frame: &mut Frame, app: &App, area: Rect) {
     let items: Vec<ListItem> = visible
         .iter()
         .map(|t| {
-            let star = if app.favourites.contains(&t.name) { "★ " } else { "  " };
-            ListItem::new(format!("{star}{}", t.name))
+            let star    = if app.favourites.contains(&t.name) { "★" } else { " " };
+            let applied = match &app.last_applied {
+                Some(name) if name == &t.name => "✓ ",
+                _ => "  ",
+            };
+            ListItem::new(format!("{star}{applied}{}", t.name))
         })
         .collect();
 

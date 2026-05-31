@@ -3,6 +3,7 @@ use crate::themes::Theme;
 use crate::preview::PreviewWorker;
 use crate::search::FuzzySearch;
 use crate::shell::ShellInfo;
+use crate::config::Config;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Mode {
@@ -44,6 +45,7 @@ pub struct App {
     pub message:         String,   // shown in Message mode
     pub message_is_err:  bool,
     pub hard_revert_preview: Vec<(usize, String)>,
+    pub config: Config,
 }
 
 #[derive(Clone)]
@@ -61,35 +63,60 @@ pub enum ImmKind {
 }
 
 impl App {
-    pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
-        let filtered = (0..themes.len()).collect();
-        let theme_names: Vec<String> = themes.iter().map(|t| t.name.clone()).collect();
-        Self {
-            themes,
-            filtered,
-            selected: 0,
-            mode: Mode::Normal,
-            search_query: String::new(),
-            preview_output: String::new(),
-            preview_loading: false,
-            show_favs: false,
-            favourites: std::collections::HashSet::new(),
-            last_applied: None,
-            should_quit: false,
-            cache_dir,
-            worker: PreviewWorker::spawn(),
-            fuzzy: FuzzySearch::new(theme_names),
-            preview_width: 80,
-            terminal_width: 80,
-            scroll_offset: 0,
-            zoom_factor: 1.0,
-            imm_input: String::new(),
-            imm_history: Vec::new(),
-            imm_cursor_tick: 0,
-            shell_info: None,
-            message: String::new(),
-            message_is_err: false,
-            hard_revert_preview: Vec::new(),
+pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
+    let filtered    = (0..themes.len()).collect();
+    let theme_names: Vec<String> = themes.iter().map(|t| t.name.clone()).collect();
+    let config      = Config::load();
+
+    // restore saved state
+    let favourites  = config.favourites.clone();
+    let zoom_factor = config.zoom_factor;
+    let last_applied = config.last_applied.clone();
+
+    // find index of last applied theme so we can scroll to it
+    let selected = last_applied.as_ref()
+        .and_then(|name| themes.iter().position(|t| &t.name == name))
+        .unwrap_or(0);
+
+    Self {
+        themes,
+        filtered,
+        selected,
+        mode: Mode::Normal,
+        search_query: String::new(),
+        preview_output: String::new(),
+        preview_loading: false,
+        show_favs: false,
+        favourites,
+        last_applied,
+        should_quit: false,
+        cache_dir,
+        worker: PreviewWorker::spawn(),
+        preview_width: 80,
+        terminal_width: 80,
+        scroll_offset: 0,
+        zoom_factor,
+        imm_input: String::new(),
+        imm_history: Vec::new(),
+        imm_cursor_tick: 0,
+        fuzzy: FuzzySearch::new(theme_names),
+        shell_info: None,
+        message: String::new(),
+        message_is_err: false,
+        hard_revert_preview: Vec::new(),
+        config,
+    }
+}
+
+
+    pub fn save_config(&mut self) {
+        self.config.favourites   = self.favourites.clone();
+        self.config.zoom_factor  = self.zoom_factor;
+        self.config.last_applied = self.last_applied.clone();
+
+        if let Err(e) = self.config.save() {
+            // non-fatal — just show a brief message
+            eprintln!("config save failed: {e}");
         }
     }
 
@@ -134,16 +161,19 @@ impl App {
     pub fn zoom_in(&mut self) {
         self.zoom_factor = (self.zoom_factor - 0.25).max(0.5);
         self.scroll_offset = 0;
+        self.save_config();
     }
 
     pub fn zoom_out(&mut self) {
         self.zoom_factor = (self.zoom_factor + 0.25).min(3.0);
         self.scroll_offset = 0;
+        self.save_config();
     }
 
     pub fn zoom_reset(&mut self) {
         self.zoom_factor = 1.0;
         self.scroll_offset = 0;
+        self.save_config();
     }
 
     pub fn toggle_favourite(&mut self) {
@@ -155,6 +185,7 @@ impl App {
                 self.favourites.insert(name);
             }
         }
+        self.save_config();
     }
 
     pub fn apply_search(&mut self, query: &str) {
@@ -323,6 +354,8 @@ impl App {
         ) {
             Ok(_) => {
                 self.last_applied   = Some(theme_name.clone());
+                self.config.last_applied = Some(theme_name.clone());
+                self.save_config();
                 self.message        = format!(
                     "✓ applied {}  →  {}\n\nopen a new terminal to see it.\npress u to undo.",
                     theme_name,

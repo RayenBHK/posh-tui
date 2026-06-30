@@ -40,10 +40,23 @@ async fn main() -> error::Result<()> {
 
     // start fetching themes in background
     let (event_tx, mut event_rx) = mpsc::channel::<AppEvent>(4);
+    let cache_dir_clone = cache_dir.clone();
     tokio::spawn(async move {
         match themes::fetch_theme_list().await {
-            Ok(list) => { let _ = event_tx.send(AppEvent::ThemesLoaded(list)).await; }
-            Err(e)   => { let _ = event_tx.send(AppEvent::ThemeLoadError(e.to_string())).await; }
+            Ok(list) => {
+                themes::save_theme_list_cache(&list, &cache_dir_clone);
+                let _ = event_tx.send(AppEvent::ThemesLoaded(list)).await;
+            }
+            Err(_) => {
+                // network failed — try cached theme list
+                if let Some(cached) = themes::load_cached_theme_list(&cache_dir_clone) {
+                    let _ = event_tx.send(AppEvent::ThemesLoaded(cached)).await;
+                } else {
+                    let _ = event_tx.send(AppEvent::ThemeLoadError(
+                        "failed to fetch themes and no cache available\n\ncheck your internet connection.".into()
+                    )).await;
+                }
+            }
         }
     });
 
@@ -85,6 +98,10 @@ async fn run_app(
         app.poll_preview().await;
         app.poll_refresh().await;
         app.tick();
+
+        if app.step_preview_timer() {
+            app.trigger_preview().await;
+        }
 
         term.draw(|f| ui::draw(f, app))?;
 
@@ -159,8 +176,10 @@ async fn handle_normal(app: &mut App, key: KeyCode, mods: KeyModifiers) {
         KeyCode::Char('/') => app.mode = Mode::Search,
         KeyCode::Char('?') => app.mode = Mode::Help,
         KeyCode::Char('f') => app.toggle_favourite(),
-        KeyCode::Char('F') => app.show_favs = !app.show_favs,
-        KeyCode::Char('r') => app.start_refresh(),
+        KeyCode::Char('F') => { app.show_favs = !app.show_favs; app.show_recent = false; app.preview_timer = 0; }
+        KeyCode::Char('R') => { app.show_recent = !app.show_recent; app.show_favs = false; app.preview_timer = 0; }
+        KeyCode::Char('x') => app.random_theme(),
+        KeyCode::Char('r') => { app.start_refresh(); app.preview_timer = 0; }
 
         KeyCode::Char(' ') => app.trigger_preview().await,
         KeyCode::Char('p') => {

@@ -106,6 +106,7 @@ Try typing: `ls`, `git status`, `git log`, `neofetch`, `pwd`, `help`
 | `Ctrl+U` | Hard revert — remove all oh-my-posh lines |
 | `f` | Toggle favourite |
 | `F` | Toggle favourites-only view |
+| `R` | Toggle recently viewed |
 | `r` | Refresh theme list from GitHub |
 | `/` | Fuzzy search |
 | `?` | Help overlay |

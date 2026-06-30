@@ -1,5 +1,5 @@
-use serde::Deserialize;
-use std::path::PathBuf;
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 use crate::error::Result;
 
 const GITHUB_API: &str =
@@ -13,7 +13,7 @@ struct GithubEntry {
     name: String,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Theme {
     pub name:     String,
     pub filename: String,
@@ -22,12 +22,33 @@ pub struct Theme {
 }
 
 impl Theme {
-    pub fn cache_path(&self, cache_dir: &PathBuf) -> PathBuf {
+    pub fn cache_path(&self, cache_dir: &Path) -> PathBuf {
         cache_dir.join(&self.filename)
     }
 }
 
 pub async fn fetch_theme_list() -> Result<Vec<Theme>> {
+    let delays = [1u64, 2, 4]; // seconds between retries
+    let mut last_err = None;
+
+    for (attempt, &delay_secs) in delays.iter().enumerate() {
+        match try_fetch_theme_list().await {
+            Ok(list) => return Ok(list),
+            Err(e) => {
+                #[cfg(debug_assertions)]
+                eprintln!("[posh-tui] fetch attempt {} failed: {}", attempt + 1, e);
+                last_err = Some(e);
+                if attempt < delays.len() - 1 {
+                    tokio::time::sleep(tokio::time::Duration::from_secs(delay_secs)).await;
+                }
+            }
+        }
+    }
+
+    Err(last_err.unwrap())
+}
+
+async fn try_fetch_theme_list() -> Result<Vec<Theme>> {
     let client = reqwest::Client::builder()
         .user_agent("posh-tui/0.1")
         .build()?;
@@ -52,7 +73,7 @@ pub async fn fetch_theme_list() -> Result<Vec<Theme>> {
     Ok(themes)
 }
 
-pub async fn download_theme(theme: &Theme, cache_dir: &PathBuf) -> Result<PathBuf> {
+pub async fn download_theme(theme: &Theme, cache_dir: &Path) -> Result<PathBuf> {
     let dest = theme.cache_path(cache_dir);
     if dest.exists() {
         return Ok(dest);
@@ -73,4 +94,26 @@ pub async fn download_theme(theme: &Theme, cache_dir: &PathBuf) -> Result<PathBu
     std::fs::write(&dest, &bytes)?;
 
     Ok(dest)
+}
+
+fn theme_list_cache_path(cache_dir: &Path) -> PathBuf {
+    cache_dir.parent()
+        .unwrap_or(cache_dir)
+        .join("themes_cache.json")
+}
+
+pub fn save_theme_list_cache(themes: &[Theme], cache_dir: &Path) {
+    let path = theme_list_cache_path(cache_dir);
+    if let Ok(json) = serde_json::to_string_pretty(themes) {
+        let _ = std::fs::write(&path, json);
+    }
+}
+
+pub fn load_cached_theme_list(cache_dir: &Path) -> Option<Vec<Theme>> {
+    let path = theme_list_cache_path(cache_dir);
+    if !path.exists() {
+        return None;
+    }
+    let data = std::fs::read_to_string(&path).ok()?;
+    serde_json::from_str(&data).ok()
 }

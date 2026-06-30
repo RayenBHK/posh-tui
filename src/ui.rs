@@ -1,3 +1,4 @@
+use ansi_to_tui::IntoText;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
@@ -75,6 +76,8 @@ fn draw_search(frame: &mut Frame, app: &App, area: Rect) {
         " posh-tui — refreshing... ".to_string()
     } else if app.show_favs {
         format!(" ★ favourites{fav_indicator} ")
+    } else if app.show_recent {
+        format!(" ⏱ recent{fav_indicator} ")
     } else {
         format!(" posh-tui{fav_indicator}  {applied_label}")
     };
@@ -140,6 +143,8 @@ fn draw_list(frame: &mut Frame, app: &App, area: Rect) {
 
     let title = if app.show_favs {
         format!(" favs ({total}) ")
+    } else if app.show_recent {
+        format!(" recent ({total}) ")
     } else {
         format!(" themes ({total}) ")
     };
@@ -194,7 +199,8 @@ fn draw_preview(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     let offset = app.scroll_offset as usize;
-    let text   = ansi_to_text(&app.preview_output);
+    // Use the pre-parsed cache populated by poll_preview(); never re-parses on render.
+    let text = app.cached_preview.clone().unwrap_or_default();
 
     // scroll by skipping N chars worth of spans per line — preserves styling
     let scrolled: Vec<Line> = text.lines.into_iter().map(|line| {
@@ -351,11 +357,6 @@ fn draw_immersive(frame: &mut Frame, app: &mut App) {
                     all_lines.push(Line::from(styled));
                 }
             }
-            ImmKind::Blank => {
-                all_lines.push(Line::from(
-                    Span::raw("").style(Style::default().bg(Color::Black))
-                ));
-            }
         }
     }
 
@@ -374,7 +375,7 @@ fn draw_immersive(frame: &mut Frame, app: &mut App) {
 fn draw_statusbar(frame: &mut Frame, app: &App, area: Rect) {
     let text = match app.mode {
         Mode::Search  => " Esc: cancel  ↑↓: navigate",
-        Mode::Normal  => " Space: preview  p: immersive  Enter: apply  u: undo  U: revert  Ctrl+U: hard revert  r: refresh  /: search  ?: help  q: quit",
+        Mode::Normal  => " Space: preview  p: immersive  Enter: apply  u: undo  U: revert  Ctrl+U: hard revert  r: refresh  /: search  x: random  R: recent  ?: help  q: quit",
         Mode::Confirm => " Enter: confirm  Esc: cancel",
         Mode::Help    => " ?: close",
         Mode::Message => " any key: close",
@@ -408,6 +409,8 @@ fn draw_help(frame: &mut Frame, area: Rect) {
         Line::from(""),
         Line::from(vec![Span::styled(" f          ", Style::default().fg(Color::Cyan)),  Span::raw("toggle favourite")]),
         Line::from(vec![Span::styled(" F          ", Style::default().fg(Color::Cyan)),  Span::raw("favourites view")]),
+        Line::from(vec![Span::styled(" R          ", Style::default().fg(Color::Cyan)),  Span::raw("recently viewed")]),
+        Line::from(vec![Span::styled(" x          ", Style::default().fg(Color::Cyan)),  Span::raw("random theme")]),
         Line::from(vec![Span::styled(" /          ", Style::default().fg(Color::Cyan)),  Span::raw("search themes")]),
         Line::from(vec![Span::styled(" r          ", Style::default().fg(Color::Cyan)),  Span::raw("refresh theme list from GitHub")]),
         Line::from(""),
@@ -673,102 +676,7 @@ fn draw_message(frame: &mut Frame, app: &App, area: Rect) {
 
 
 pub fn ansi_to_text(s: &str) -> Text<'static> {
-    let mut lines: Vec<Line<'static>> = Vec::new();
-    let mut spans: Vec<Span<'static>>  = Vec::new();
-    let mut style = Style::default();
-    let mut buf   = String::new();
-    let mut chars = s.chars().peekable();
-
-    while let Some(c) = chars.next() {
-        if c == '\x1b' && chars.peek() == Some(&'[') {
-            if !buf.is_empty() {
-                spans.push(Span::styled(buf.clone(), style));
-                buf.clear();
-            }
-            chars.next();
-            let mut seq = String::new();
-            for ch in chars.by_ref() {
-                seq.push(ch);
-                if ch.is_ascii_alphabetic() { break; }
-            }
-            let params = &seq[..seq.len().saturating_sub(1)];
-            style = apply_ansi_style(params, style);
-        } else if c == '\n' {
-            if !buf.is_empty() {
-                spans.push(Span::styled(buf.clone(), style));
-                buf.clear();
-            }
-            lines.push(Line::from(spans.clone()));
-            spans.clear();
-        } else if c == '\r' {
-            // skip
-        } else {
-            buf.push(c);
-        }
-    }
-    if !buf.is_empty() { spans.push(Span::styled(buf, style)); }
-    if !spans.is_empty() { lines.push(Line::from(spans)); }
-    Text::from(lines)
-}
-
-fn apply_ansi_style(params: &str, current: Style) -> Style {
-    let codes: Vec<u8> = params.split(';').filter_map(|s| s.parse().ok()).collect();
-    let mut style = current;
-    let mut i = 0;
-    while i < codes.len() {
-        match codes[i] {
-            0  => style = Style::default(),
-            1  => style = style.add_modifier(Modifier::BOLD),
-            2  => style = style.add_modifier(Modifier::DIM),
-            3  => style = style.add_modifier(Modifier::ITALIC),
-            4  => style = style.add_modifier(Modifier::UNDERLINED),
-            30 => style = style.fg(Color::Black),
-            31 => style = style.fg(Color::Red),
-            32 => style = style.fg(Color::Green),
-            33 => style = style.fg(Color::Yellow),
-            34 => style = style.fg(Color::Blue),
-            35 => style = style.fg(Color::Magenta),
-            36 => style = style.fg(Color::Cyan),
-            37 => style = style.fg(Color::White),
-            40 => style = style.bg(Color::Black),
-            41 => style = style.bg(Color::Red),
-            42 => style = style.bg(Color::Green),
-            43 => style = style.bg(Color::Yellow),
-            44 => style = style.bg(Color::Blue),
-            45 => style = style.bg(Color::Magenta),
-            46 => style = style.bg(Color::Cyan),
-            47 => style = style.bg(Color::White),
-            90 => style = style.fg(Color::DarkGray),
-            91 => style = style.fg(Color::LightRed),
-            92 => style = style.fg(Color::LightGreen),
-            93 => style = style.fg(Color::LightYellow),
-            94 => style = style.fg(Color::LightBlue),
-            95 => style = style.fg(Color::LightMagenta),
-            96 => style = style.fg(Color::LightCyan),
-            97 => style = style.fg(Color::White),
-            38 => {
-                if i + 1 < codes.len() {
-                    match codes[i+1] {
-                        5 if i+2 < codes.len() => { style = style.fg(Color::Indexed(codes[i+2])); i += 2; }
-                        2 if i+4 < codes.len() => { style = style.fg(Color::Rgb(codes[i+2], codes[i+3], codes[i+4])); i += 4; }
-                        _ => {}
-                    }
-                }
-            }
-            48 => {
-                if i + 1 < codes.len() {
-                    match codes[i+1] {
-                        5 if i+2 < codes.len() => { style = style.bg(Color::Indexed(codes[i+2])); i += 2; }
-                        2 if i+4 < codes.len() => { style = style.bg(Color::Rgb(codes[i+2], codes[i+3], codes[i+4])); i += 4; }
-                        _ => {}
-                    }
-                }
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    style
+    s.to_string().into_text().unwrap_or_default()
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {

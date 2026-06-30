@@ -1,9 +1,13 @@
 use std::path::PathBuf;
+use rand::Rng;
 use crate::themes::Theme;
 use crate::preview::PreviewWorker;
 use crate::search::FuzzySearch;
 use crate::shell::ShellInfo;
 use crate::config::Config;
+use crate::ui::ansi_to_text;
+
+const PREVIEW_DEBOUNCE: u8 = 5; // ~165ms at 30fps
 
 
 #[derive(Debug, Clone, PartialEq)]
@@ -25,8 +29,10 @@ pub struct App {
     pub mode:             Mode,
     pub search_query:     String,
     pub preview_output:   String,
+    pub cached_preview:   Option<ratatui::text::Text<'static>>,
     pub preview_loading:  bool,
     pub show_favs:        bool,
+    pub show_recent:      bool,
     pub favourites:       std::collections::HashSet<String>,
     pub last_applied:     Option<String>,
     pub should_quit:      bool,
@@ -37,6 +43,8 @@ pub struct App {
     // scroll & zoom
     pub scroll_offset:    u16,
     pub zoom_factor:      f32,   // 1.0 = natural, 1.5 = compressed to 66%
+    // auto-preview debounce (ticks, ~33 ms each)
+    pub preview_timer:    u8,
     // immersive mode
     pub imm_input:        String,
     pub imm_history:      Vec<ImmLine>,
@@ -49,8 +57,6 @@ pub struct App {
     pub config: Config,
     pub loading:    bool,
     pub refreshing: bool,
-    #[allow(dead_code)]
-    pub refresh_tx: Option<tokio::sync::mpsc::Sender<Vec<Theme>>>,
     pub refresh_rx: Option<tokio::sync::mpsc::Receiver<Vec<Theme>>>,
 }
 
@@ -65,8 +71,6 @@ pub enum ImmKind {
     Prompt,   // the oh-my-posh rendered prompt line
     Input,    // what the user typed
     Output,   // fake command output
-    #[allow(dead_code)]
-    Blank,
 }
 
 impl App {
@@ -92,8 +96,10 @@ pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
         mode: Mode::Normal,
         search_query: String::new(),
         preview_output: String::new(),
+        cached_preview: None,
         preview_loading: false,
         show_favs: false,
+        show_recent: false,
         favourites,
         last_applied,
         should_quit: false,
@@ -103,6 +109,7 @@ pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
         terminal_width: 80,
         scroll_offset: 0,
         zoom_factor,
+        preview_timer: 0,
         imm_input: String::new(),
         imm_history: Vec::new(),
         imm_cursor_tick: 0,
@@ -114,7 +121,6 @@ pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
         config,
         loading:    false,
         refreshing: false,
-        refresh_tx: None,
         refresh_rx: None,
     }
 }
@@ -132,13 +138,13 @@ pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
     }
 
     pub fn selected_theme(&self) -> Option<&Theme> {
-        self.filtered.get(self.selected)
-            .and_then(|&i| self.themes.get(i))
+        self.visible_themes().get(self.selected).copied()
     }
 
     pub fn move_up(&mut self) {
         if self.selected > 0 { self.selected -= 1; }
         self.scroll_offset = 0;
+        self.preview_timer = PREVIEW_DEBOUNCE;
     }
 
     pub fn move_down(&mut self) {
@@ -146,24 +152,28 @@ pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
             self.selected += 1;
         }
         self.scroll_offset = 0;
+        self.preview_timer = PREVIEW_DEBOUNCE;
     }
 
-    pub fn move_top(&mut self)    { self.selected = 0; self.scroll_offset = 0; }
+    pub fn move_top(&mut self)    { self.selected = 0; self.scroll_offset = 0; self.preview_timer = PREVIEW_DEBOUNCE; }
     pub fn move_bottom(&mut self) {
         let len = self.visible_themes().len();
         if len > 0 { self.selected = len - 1; }
         self.scroll_offset = 0;
+        self.preview_timer = PREVIEW_DEBOUNCE;
     }
 
     pub fn page_up(&mut self) {
         self.selected = self.selected.saturating_sub(10);
         self.scroll_offset = 0;
+        self.preview_timer = PREVIEW_DEBOUNCE;
     }
 
     pub fn page_down(&mut self) {
         let max = self.visible_themes().len().saturating_sub(1);
         self.selected = (self.selected + 10).min(max);
         self.scroll_offset = 0;
+        self.preview_timer = PREVIEW_DEBOUNCE;
     }
 
     pub fn scroll_left(&mut self)  { self.scroll_offset = self.scroll_offset.saturating_sub(4); }
@@ -187,6 +197,15 @@ pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
         self.save_config();
     }
 
+    pub fn step_preview_timer(&mut self) -> bool {
+        if self.preview_timer > 0 {
+            self.preview_timer -= 1;
+            self.preview_timer == 0
+        } else {
+            false
+        }
+    }
+
     pub fn toggle_favourite(&mut self) {
         if let Some(t) = self.selected_theme() {
             let name = t.name.clone();
@@ -197,6 +216,14 @@ pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
             }
         }
         self.save_config();
+    }
+
+    pub fn random_theme(&mut self) {
+        let len = self.visible_themes().len();
+        if len == 0 { return; }
+        self.selected = rand::rng().random_range(0..len);
+        self.scroll_offset = 0;
+        self.preview_timer = PREVIEW_DEBOUNCE;
     }
 
     pub fn apply_search(&mut self, query: &str) {
@@ -212,6 +239,7 @@ pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
 
         self.selected = 0;
         self.scroll_offset = 0;
+        self.preview_timer = 0;
     }
 
     pub fn clear_search(&mut self) {
@@ -224,14 +252,20 @@ pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
             .collect();
         self.selected = 0;
         self.scroll_offset = 0;
+        self.preview_timer = 0;
     }
 
     pub fn visible_themes(&self) -> Vec<&Theme> {
         self.filtered.iter()
             .filter_map(|&i| self.themes.get(i))
             .filter(|t| {
-                if self.show_favs { self.favourites.contains(&t.name) }
-                else { true }
+                if self.show_favs {
+                    self.favourites.contains(&t.name)
+                } else if self.show_recent {
+                    self.config.recent.contains(&t.name)
+                } else {
+                    true
+                }
             })
             .collect()
     }
@@ -243,8 +277,11 @@ pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
 
     pub async fn trigger_preview(&mut self) {
         let Some(theme) = self.selected_theme().cloned() else { return };
+        self.config.push_recent(&theme.name);
+        self.save_config();
         self.preview_loading = true;
         self.preview_output  = String::new();
+        self.cached_preview  = None;
 
         let dest = self.cache_dir.join(&theme.filename);
         if !dest.exists() {
@@ -277,6 +314,7 @@ pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
     pub async fn poll_preview(&mut self) {
         if let Some(out) = self.worker.take_output().await {
             self.preview_output  = out.clone();
+            self.cached_preview  = Some(ansi_to_text(&out));
             self.preview_loading = false;
 
             if self.mode == Mode::Immersive && self.imm_history.is_empty() {
@@ -309,6 +347,7 @@ pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
         if self.refreshing { return; }
         self.refreshing     = true;
         self.preview_output.clear();
+        self.cached_preview  = None;
 
         let (tx, rx) = tokio::sync::mpsc::channel::<Vec<Theme>>(1);
         self.refresh_rx = Some(rx);
@@ -581,5 +620,94 @@ fn fake_command_output(cmd: &str) -> Vec<String> {
         ],
         "" => vec![],
         _ => vec![format!("bash: {}: command not found", cmd.split_whitespace().next().unwrap_or(cmd))],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use crate::themes::Theme;
+
+    fn dummy_themes() -> Vec<Theme> {
+        vec![
+            Theme {
+                name:     "catppuccin".into(),
+                filename: "catppuccin.omp.json".into(),
+                raw_url:  "http://example.com/1".into(),
+                local:    None,
+            },
+            Theme {
+                name:     "tokyo-night".into(),
+                filename: "tokyo-night.omp.json".into(),
+                raw_url:  "http://example.com/2".into(),
+                local:    None,
+            },
+            Theme {
+                name:     "agnoster".into(),
+                filename: "agnoster.omp.json".into(),
+                raw_url:  "http://example.com/3".into(),
+                local:    None,
+            },
+        ]
+    }
+
+    // zoom_in DECREASES zoom_factor (more lines visible), clamped at 0.5
+    // zoom_out INCREASES zoom_factor (fewer lines visible), clamped at 3.0
+    #[tokio::test]
+    async fn test_zoom_in_bounded() {
+        let mut app = App::new(dummy_themes(), PathBuf::from("/tmp"));
+        for _ in 0..20 { app.zoom_in(); }
+        assert!(app.zoom_factor >= 0.5, "zoom_factor should not go below 0.5, got {}", app.zoom_factor);
+    }
+
+    #[tokio::test]
+    async fn test_zoom_out_bounded() {
+        let mut app = App::new(dummy_themes(), PathBuf::from("/tmp"));
+        for _ in 0..20 { app.zoom_out(); }
+        assert!(app.zoom_factor <= 3.0, "zoom_factor should not exceed 3.0, got {}", app.zoom_factor);
+    }
+
+    #[tokio::test]
+    async fn test_zoom_reset() {
+        let mut app = App::new(dummy_themes(), PathBuf::from("/tmp"));
+        app.zoom_in();
+        app.zoom_in();
+        app.zoom_reset();
+        assert_eq!(app.zoom_factor, 1.0);
+    }
+
+    #[tokio::test]
+    async fn test_toggle_favourite_adds_and_removes() {
+        let mut app = App::new(dummy_themes(), PathBuf::from("/tmp"));
+        // filtered already spans all themes from App::new; selected=0 picks themes[0] = catppuccin
+        app.selected = 0;
+
+        // toggle on — catppuccin should appear in favourites
+        app.toggle_favourite();
+        assert!(app.favourites.contains("catppuccin"), "expected catppuccin in favourites after first toggle");
+
+        // toggle off — catppuccin should be removed
+        app.toggle_favourite();
+        assert!(!app.favourites.contains("catppuccin"), "expected catppuccin removed from favourites after second toggle");
+    }
+
+    #[tokio::test]
+    async fn test_move_up_at_top_clamps() {
+        let mut app = App::new(dummy_themes(), PathBuf::from("/tmp"));
+        app.selected = 0;
+        app.move_up();
+        assert_eq!(app.selected, 0, "move_up at index 0 should stay at 0");
+    }
+
+    #[tokio::test]
+    async fn test_visible_themes_favs_filter() {
+        let mut app = App::new(dummy_themes(), PathBuf::from("/tmp"));
+        // filtered covers all three themes from App::new
+        app.favourites.insert("catppuccin".into());
+        app.show_favs = true;
+        let visible = app.visible_themes();
+        assert_eq!(visible.len(), 1, "only the favourite should be visible");
+        assert_eq!(visible[0].name, "catppuccin");
     }
 }

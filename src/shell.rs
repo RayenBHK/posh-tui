@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use crate::error::{PoshError, Result};
 
 const MARKER_START: &str = "# posh-tui:start";
@@ -51,7 +51,7 @@ impl Shell {
         Ok(path)
     }
 
-    pub fn init_line(&self, theme_path: &PathBuf) -> String {
+    pub fn init_line(&self, theme_path: &Path) -> String {
         // use full path to oh-my-posh binary so PATH order doesn't matter
         let omp_bin = which_omp();
         let path_str = theme_path.display();
@@ -98,8 +98,8 @@ impl ShellInfo {
     }
 }
 
-fn backup_path_for(rc_path: &PathBuf) -> PathBuf {
-    let mut p = rc_path.clone();
+fn backup_path_for(rc_path: &Path) -> PathBuf {
+    let mut p = rc_path.to_path_buf();
     let name  = p.file_name()
         .unwrap_or_default()
         .to_string_lossy()
@@ -111,7 +111,7 @@ fn backup_path_for(rc_path: &PathBuf) -> PathBuf {
 // ── operations ────────────────────────────────────────────────────────────────
 
 /// Write theme to rc file. Creates backup first.
-pub fn apply_theme(info: &ShellInfo, theme_path: &PathBuf) -> Result<()> {
+pub fn apply_theme(info: &ShellInfo, theme_path: &Path) -> Result<()> {
     let contents = read_or_empty(&info.rc_path)?;
     backup(&info.rc_path, &info.backup_path)?;
 
@@ -280,4 +280,140 @@ fn which_omp() -> String {
 
     // last resort — hope it's in PATH by the time shell loads
     "oh-my-posh".to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── replace_managed_block ──────────────────────────────────────────────
+
+    #[test]
+    fn replace_managed_block_replaces_existing() {
+        let contents = "# header\n\n# posh-tui:start\neval \"$(oh-my-posh init bash --config old)\"\n# posh-tui:end\n# footer\n";
+        let new_block = "# posh-tui:start\neval \"$(oh-my-posh init bash --config new)\"\n# posh-tui:end";
+        let result = replace_managed_block(contents, new_block);
+        assert!(result.contains("config new"));
+        assert!(!result.contains("config old"));
+        assert!(result.contains("# header"));
+        assert!(result.contains("# footer"));
+        assert!(result.contains(new_block));
+    }
+
+    #[test]
+    fn replace_managed_block_appends_when_no_block() {
+        let contents = "# header\n# some config\n";
+        let new_block = "# posh-tui:start\neval \"$(oh-my-posh init bash --config test)\"\n# posh-tui:end";
+        let result = replace_managed_block(contents, new_block);
+        // replace_managed_block only replaces — it doesn't add a block that doesn't exist
+        assert!(result.contains("# header"));
+        assert!(result.contains("# some config"));
+        assert!(!result.contains("posh-tui:start"));
+    }
+
+    #[test]
+    fn replace_managed_block_preserves_surrounding_content() {
+        let contents = "export PATH=$PATH:/usr/local/bin\n\n# posh-tui:start\neval \"old\"\n# posh-tui:end\n\nsource ~/.bash_aliases\n";
+        let new_block = "# posh-tui:start\neval \"new\"\n# posh-tui:end";
+        let result = replace_managed_block(contents, new_block);
+        let lines: Vec<&str> = result.lines().collect();
+        assert_eq!(lines[0], "export PATH=$PATH:/usr/local/bin");
+        assert!(result.contains("source ~/.bash_aliases"));
+        assert!(result.contains("eval \"new\""));
+    }
+
+    // ── remove_managed_block ───────────────────────────────────────────────
+
+    #[test]
+    fn remove_managed_block_removes_block() {
+        let contents = "# header\n\n# posh-tui:start\neval \"$(oh-my-posh init bash)\"\n# posh-tui:end\n# footer\n";
+        let result = remove_managed_block(contents);
+        assert!(!result.contains("posh-tui:start"));
+        assert!(!result.contains("posh-tui:end"));
+        assert!(!result.contains("oh-my-posh"));
+        assert!(result.contains("# header"));
+        assert!(result.contains("# footer"));
+    }
+
+    #[test]
+    fn remove_managed_block_handles_no_block() {
+        let contents = "# header\n# no posh-tui here\n# footer\n";
+        let result = remove_managed_block(contents);
+        assert_eq!(result, "# header\n# no posh-tui here\n# footer\n");
+    }
+
+    #[test]
+    fn remove_managed_block_handles_empty_file() {
+        let result = remove_managed_block("");
+        assert_eq!(result, "\n");
+    }
+
+    #[test]
+    fn remove_managed_block_only_block() {
+        let contents = "# posh-tui:start\neval \"$(oh-my-posh init bash)\"\n# posh-tui:end\n";
+        let result = remove_managed_block(contents);
+        assert_eq!(result.trim(), "");
+    }
+
+    // ── remove_all_omp_lines ───────────────────────────────────────────────
+
+    #[test]
+    fn remove_all_omp_lines_removes_all() {
+        let contents = "# header\neval \"$(oh-my-posh init bash)\"\nsome config\n# posh-tui:start\neval \"test\"\n# posh-tui:end\n";
+        let (result, removed) = remove_all_omp_lines(contents);
+        assert!(!result.contains("oh-my-posh"));
+        assert!(!result.contains("posh-tui:start"));
+        assert!(!result.contains("posh-tui:end"));
+        assert!(result.contains("# header"));
+        assert!(result.contains("some config"));
+        assert_eq!(removed, 4);
+    }
+
+    #[test]
+    fn remove_all_omp_lines_removes_manual_lines() {
+        let contents = "# my manual omp config\neval \"$(oh-my-posh init bash --config theme1)\"\nother stuff\n";
+        let (result, removed) = remove_all_omp_lines(contents);
+        assert!(!result.contains("oh-my-posh"));
+        assert!(result.contains("other stuff"));
+        assert!(result.contains("# my manual omp config")); // "omp" ≠ "oh-my-posh"
+        assert_eq!(removed, 1); // only the line containing "oh-my-posh" is removed
+    }
+
+    #[test]
+    fn remove_all_omp_lines_no_omp() {
+        let contents = "# just normal config\nexport PATH=$PATH\nsource ~/.bashrc\n";
+        let (result, removed) = remove_all_omp_lines(contents);
+        assert_eq!(result, contents);
+        assert_eq!(removed, 0);
+    }
+
+    #[test]
+    fn remove_all_omp_lines_empty() {
+        let (result, removed) = remove_all_omp_lines("");
+        assert_eq!(result.trim(), "");
+        assert_eq!(removed, 0);
+    }
+
+    // ── backup_path_for ────────────────────────────────────────────────────
+
+    #[test]
+    fn backup_path_for_bashrc() {
+        let rc = PathBuf::from("/home/user/.bashrc");
+        let bak = backup_path_for(&rc);
+        assert_eq!(bak, PathBuf::from("/home/user/.bashrc.posh-tui.bak"));
+    }
+
+    #[test]
+    fn backup_path_for_zshrc() {
+        let rc = PathBuf::from("/home/user/.zshrc");
+        let bak = backup_path_for(&rc);
+        assert_eq!(bak, PathBuf::from("/home/user/.zshrc.posh-tui.bak"));
+    }
+
+    #[test]
+    fn backup_path_for_fish_config() {
+        let rc = PathBuf::from("/home/user/.config/fish/config.fish");
+        let bak = backup_path_for(&rc);
+        assert_eq!(bak, PathBuf::from("/home/user/.config/fish/config.fish.posh-tui.bak"));
+    }
 }

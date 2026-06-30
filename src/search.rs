@@ -56,3 +56,46 @@ impl FuzzySearch {
         results
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_names() -> Vec<String> {
+        vec!["catppuccin".into(), "tokyo-night".into(), "agnoster".into()]
+    }
+
+    #[test]
+    fn test_exact_match_included() {
+        let names = make_names();
+        let mut fs = FuzzySearch::new(names);
+        let results = fs.query("catppuccin");
+        assert!(!results.is_empty());
+        assert!(results.contains(&"catppuccin".to_string()));
+    }
+
+    #[test]
+    fn test_no_match_returns_empty() {
+        let names = make_names();
+        let mut fs = FuzzySearch::new(names);
+        let results = fs.query("zzznomatch999");
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_case_insensitive() {
+        let names = make_names();
+        let mut fs = FuzzySearch::new(names);
+        let results = fs.query("CATPPUCCIN");
+        assert!(results.contains(&"catppuccin".to_string()));
+    }
+
+    #[test]
+    fn test_empty_query_returns_all() {
+        let names = make_names();
+        let count = names.len();
+        let mut fs = FuzzySearch::new(names);
+        let results = fs.query("");
+        assert_eq!(results.len(), count);
+    }
+}

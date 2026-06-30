@@ -46,6 +46,7 @@ jobs:
         run: cargo install cross --git https://github.com/cross-rs/cross
 
       - name: Build release binary
+        shell: bash
         run: |
           if [ "${{ matrix.cross }}" = "true" ]; then
             cross build --release --target ${{ matrix.target }}
@@ -55,10 +56,12 @@ jobs:
 
       - name: Rename binary (unix)
         if: runner.os != 'Windows'
+        shell: bash
         run: cp target/${{ matrix.target }}/release/posh-tui ${{ matrix.artifact }}
 
       - name: Rename binary (windows)
         if: runner.os == 'Windows'
+        shell: bash
         run: cp target/${{ matrix.target }}/release/posh-tui.exe ${{ matrix.artifact }}
 
       - uses: actions/upload-artifact@v4

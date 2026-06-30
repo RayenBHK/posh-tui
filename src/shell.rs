@@ -74,8 +74,6 @@ pub struct ShellInfo {
     pub shell: Shell,
     pub rc_path: PathBuf,
     pub has_managed: bool, // posh-tui:start block exists
-    #[allow(dead_code)]
-    pub has_any_omp: bool, // any oh-my-posh line exists (for hard revert)
     pub backup_path: PathBuf,
 }
 
@@ -85,20 +83,17 @@ impl ShellInfo {
         let rc_path = shell.rc_path()?;
         let backup_path = backup_path_for(&rc_path);
 
-        let (has_managed, has_any_omp) = if rc_path.exists() {
+        let has_managed = if rc_path.exists() {
             let contents = std::fs::read_to_string(&rc_path)?;
-            let has_managed = contents.contains(MARKER_START);
-            let has_any_omp = contents.lines().any(|l| l.contains("oh-my-posh"));
-            (has_managed, has_any_omp)
+            contents.contains(MARKER_START)
         } else {
-            (false, false)
+            false
         };
 
         Ok(Self {
             shell,
             rc_path,
             has_managed,
-            has_any_omp,
             backup_path,
         })
     }
@@ -456,7 +451,6 @@ mod tests {
             shell: Shell::Bash,
             rc_path: rc_path.clone(),
             has_managed: false,
-            has_any_omp: false,
             backup_path: backup_path.clone(),
         };
 

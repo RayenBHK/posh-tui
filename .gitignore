@@ -1,3 +1,10 @@
 /target
 /analysis.md
-/posh-tui-v0.2.0-x86_64-linux
+
+# Ignore downloaded binaries
+/posh-tui-*
+
+# Ignore downloaded CI logs and archives
+/logs/
+/logs2/
+*.zip

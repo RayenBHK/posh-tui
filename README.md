@@ -118,6 +118,7 @@ Try typing: `ls`, `git status`, `git log`, `neofetch`, `pwd`, `help`
 | `R` | Toggle recently viewed |
 | `r` | Refresh theme list from GitHub |
 | `/` | Fuzzy search |
+| `n` / `N` | Dismiss Nerd Font warning banner |
 | `?` | Help overlay |
 | `q` | Quit |
 | `Scroll` | Scroll up/down the theme list |

@@ -480,8 +480,20 @@ fn draw_help(frame: &mut Frame, area: Rect) {
             Span::raw("apply theme to shell"),
         ]),
         Line::from(vec![
+            Span::styled(" e          ", Style::default().fg(Color::Cyan)),
+            Span::raw("edit theme in $EDITOR"),
+        ]),
+        Line::from(vec![
             Span::styled(" u          ", Style::default().fg(Color::Red)),
             Span::raw("undo last apply"),
+        ]),
+        Line::from(vec![
+            Span::styled(" U          ", Style::default().fg(Color::Red)),
+            Span::raw("soft revert (remove managed block)"),
+        ]),
+        Line::from(vec![
+            Span::styled(" Ctrl+U     ", Style::default().fg(Color::Red)),
+            Span::raw("hard revert (remove all omp lines)"),
         ]),
         Line::from(""),
         Line::from(vec![
@@ -520,6 +532,10 @@ fn draw_help(frame: &mut Frame, area: Rect) {
         Line::from(vec![
             Span::styled(" r          ", Style::default().fg(Color::Cyan)),
             Span::raw("refresh theme list from GitHub"),
+        ]),
+        Line::from(vec![
+            Span::styled(" n / N      ", Style::default().fg(Color::DarkGray)),
+            Span::raw("dismiss Nerd Font warning"),
         ]),
         Line::from(""),
         Line::from(vec![

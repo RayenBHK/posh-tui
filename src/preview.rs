@@ -54,17 +54,22 @@ async fn render_preview(path: &PathBuf, width: u16) -> Result<String> {
     // subtract 2 for the border chars so content fits perfectly inside the pane
     let cols = width.saturating_sub(2).to_string();
 
-    let output = tokio::process::Command::new("oh-my-posh")
-        .args(["print", "primary", "--config"])
-        .arg(path)
-        .arg("--shell")
-        .arg("bash")
-        .env("TERM", "xterm-256color")
-        .env("COLORTERM", "truecolor")
-        .env("COLUMNS", &cols) // tells omp exactly how wide to render
-        .env("LINES", "10")
-        .output()
-        .await?;
+    let output = tokio::time::timeout(
+        tokio::time::Duration::from_secs(5),
+        tokio::process::Command::new("oh-my-posh")
+            .args(["print", "primary", "--config"])
+            .arg(path)
+            .arg("--shell")
+            .arg("bash")
+            .env("TERM", "xterm-256color")
+            .env("COLORTERM", "truecolor")
+            .env("COLUMNS", &cols)
+            .env("LINES", "10")
+            .output(),
+    )
+    .await
+    .map_err(|_| crate::error::PoshError::Preview("oh-my-posh timed out after 5s".into()))?
+    ?;
 
     let raw = String::from_utf8_lossy(&output.stdout).to_string();
 

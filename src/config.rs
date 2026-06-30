@@ -72,7 +72,11 @@ impl Config {
         }
 
         let contents = toml::to_string_pretty(self).map_err(PoshError::TomlSer)?;
-        std::fs::write(&path, contents)?;
+        if let Err(e) = std::fs::write(&path, contents) {
+            #[cfg(debug_assertions)]
+            eprintln!("[posh-tui] config save failed: {e}");
+            return Err(PoshError::Io(e));
+        }
         Ok(())
     }
 

@@ -421,6 +421,7 @@ sequenceDiagram
 | `x` | Jump to random theme |
 | `r` | Refresh theme list from GitHub |
 | `/` | Fuzzy search |
+| `n` / `N` | Dismiss Nerd Font warning banner |
 | `?` | Help overlay |
 | `q` / `Ctrl+C` | Quit |
 | `Scroll` | Scroll up/down the theme list |

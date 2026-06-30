@@ -1,6 +1,6 @@
 [package]
 name = "posh-tui"
-version = "0.4.0"
+version = "0.4.1"
 description = "A terminal UI for browsing, previewing, and applying Oh My Posh themes"
 license = "MIT"
 repository = "https://github.com/RayenBHK/posh-tui"
@@ -35,3 +35,5 @@ insta = "1.39"
 [profile.release]
 opt-level = 3
 strip = true
+lto = "fat"
+codegen-units = 1

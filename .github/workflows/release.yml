@@ -83,9 +83,15 @@ jobs:
         shell: bash
         run: sha256sum posh-tui-* > checksums.txt
 
+      - name: Extract release notes
+        shell: bash
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          sed -n "/^## \[$VERSION\]/,/^## \[/p" CHANGELOG.md | sed '1d;$d' > RELEASE_NOTES.txt
+
       - uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          body_path: RELEASE_NOTES.txt
           files: |
             posh-tui-x86_64-linux
             posh-tui-x86_64-macos

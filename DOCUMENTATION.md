@@ -38,11 +38,11 @@ Oh My Posh ships with 120+ themes but provides no interactive browser. Users mus
 | Metric | Value |
 |--------|-------|
 | Language | Rust (edition 2021) |
-| Version | 0.2.0 |
-| Lines of code | ~2,400 (9 source files) |
+| Version | 0.4.0 |
+| Lines of code | ~2,500 (9 source files) |
 | Binary size | 4.2 MB (release, stripped) |
-| Dependencies | 11 crates |
-| Test count | 28 unit tests |
+| Dependencies | 13 crates |
+| Test count | 32 tests (including UI snapshots) |
 | Platforms | Linux (x64 + ARM64), macOS (x64 + ARM), WSL, Windows |
 
 ---
@@ -57,6 +57,7 @@ Oh My Posh ships with 120+ themes but provides no interactive browser. Users mus
 | **Live ANSI preview** | Calls `oh-my-posh print primary` to render the actual prompt with full colors |
 | **Auto-preview on navigation** | Preview updates automatically when scrolling (165ms debounce) |
 | **Immersive mode** | Full-screen preview at true terminal width with a fake interactive shell |
+| **Live Theme Editing** | Open any theme in `$EDITOR` from the TUI and see it reload instantly on save |
 | **Theme application** | Writes managed block to shell rc file (bash/zsh/fish) with backup |
 | **Undo / revert** | Three tiers: undo (restore backup), soft revert (remove block), hard revert (remove all omp lines) |
 | **Fuzzy search** | Powered by nucleo — case-insensitive with smart normalization |
@@ -413,6 +414,7 @@ sequenceDiagram
 | `u` | Undo last apply (restores backup) |
 | `U` | Soft revert — remove posh-tui block only |
 | `Ctrl+U` | Hard revert — remove all oh-my-posh lines |
+| `e` | Edit selected theme in `$EDITOR` |
 | `f` | Toggle favourite |
 | `F` | Toggle favourites-only view |
 | `R` | Toggle recently viewed view |
@@ -421,6 +423,7 @@ sequenceDiagram
 | `/` | Fuzzy search |
 | `?` | Help overlay |
 | `q` / `Ctrl+C` | Quit |
+| `Scroll` | Scroll up/down the theme list |
 
 ---
 
@@ -626,6 +629,8 @@ The CI will automatically build and attach binaries to a new GitHub release.
 | `nucleo` | 0.5 | Fuzzy matcher for theme search |
 | `ansi-to-tui` | 7 | ANSI escape sequence parsing to ratatui Text |
 | `rand` | 0.9 | Random theme selection |
+| `clap` | 4.5 | CLI argument parsing and shell completion generation |
+| `insta` | 1.39 | UI snapshot testing |
 
 ---
 
@@ -637,7 +642,7 @@ The CI will automatically build and attach binaries to a new GitHub release.
 cargo test
 ```
 
-### Test coverage — 28 tests total
+### Test coverage — 32 tests total
 
 #### `shell.rs` — 14 tests (rc-file patching logic)
 

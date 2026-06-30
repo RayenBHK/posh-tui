@@ -1,14 +1,17 @@
-use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
-use std::collections::HashSet;
 use crate::error::{PoshError, Result};
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::path::PathBuf;
 
 const CONFIG_FILE: &str = "config.toml";
-const APP_DIR:     &str = "posh-tui";
-const MAX_RECENT:  usize = 10;
+const APP_DIR: &str = "posh-tui";
+const MAX_RECENT: usize = 10;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Config {
+    #[serde(default)]
+    pub hide_font_warning: bool,
+
     #[serde(default)]
     pub last_applied: Option<String>,
 
@@ -22,15 +25,18 @@ pub struct Config {
     pub recent: Vec<String>,
 }
 
-fn default_zoom() -> f32 { 1.0 }
+fn default_zoom() -> f32 {
+    1.0
+}
 
 impl Default for Config {
     fn default() -> Self {
         Self {
+            hide_font_warning: false,
             last_applied: None,
-            favourites:   HashSet::new(),
-            zoom_factor:  1.0,
-            recent:       Vec::new(),
+            favourites: HashSet::new(),
+            zoom_factor: 1.0,
+            recent: Vec::new(),
         }
     }
 }
@@ -65,8 +71,7 @@ impl Config {
             std::fs::create_dir_all(parent)?;
         }
 
-        let contents = toml::to_string_pretty(self)
-            .map_err(PoshError::TomlSer)?;
+        let contents = toml::to_string_pretty(self).map_err(PoshError::TomlSer)?;
         std::fs::write(&path, contents)?;
         Ok(())
     }
@@ -96,7 +101,11 @@ mod tests {
         cfg.recent.clear();
         cfg.push_recent("catppuccin");
         cfg.push_recent("catppuccin");
-        let count = cfg.recent.iter().filter(|n| n.as_str() == "catppuccin").count();
+        let count = cfg
+            .recent
+            .iter()
+            .filter(|n| n.as_str() == "catppuccin")
+            .count();
         assert_eq!(count, 1);
     }
 

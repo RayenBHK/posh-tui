@@ -8,12 +8,16 @@ mod themes;
 mod ui;
 
 use app::{App, Mode};
+use clap::{CommandFactory, Parser};
+use clap_complete::{generate, Shell};
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers},
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers, MouseEventKind,
+    },
     execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{Terminal, backend::CrosstermBackend};
+use ratatui::{backend::CrosstermBackend, Terminal};
 use std::{io, path::PathBuf, time::Duration};
 use tokio::sync::mpsc;
 
@@ -23,8 +27,31 @@ pub enum AppEvent {
     ThemeLoadError(String),
 }
 
+#[derive(Parser, Debug)]
+#[command(name = "posh-tui", author, version, about, long_about = None)]
+pub struct Cli {
+    /// Skip applying the theme for testing
+    #[arg(long)]
+    dry_run: bool,
+
+    /// Generate shell completions
+    #[arg(long, value_enum)]
+    generate_completions: Option<Shell>,
+}
+
 #[tokio::main]
 async fn main() -> error::Result<()> {
+    let cli = Cli::parse();
+
+    if let Some(shell) = cli.generate_completions {
+        let mut cmd = Cli::command();
+        let bin_name = cmd.get_name().to_string();
+        generate(shell, &mut cmd, bin_name, &mut io::stdout());
+        return Ok(());
+    }
+
+    let dry_run = cli.dry_run;
+
     let cache_dir = dirs_next::cache_dir()
         .unwrap_or_else(|| PathBuf::from(".cache"))
         .join("posh-tui")
@@ -35,7 +62,7 @@ async fn main() -> error::Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
-    let backend  = CrosstermBackend::new(stdout);
+    let backend = CrosstermBackend::new(stdout);
     let mut term = Terminal::new(backend)?;
 
     // start fetching themes in background
@@ -61,22 +88,29 @@ async fn main() -> error::Result<()> {
     });
 
     let mut app = App::new(vec![], cache_dir);
-    app.loading  = true;
+    app.dry_run = dry_run;
+    app.loading = true;
     app.load_shell_info();
 
     let res = run_app(&mut term, &mut app, &mut event_rx).await;
 
     disable_raw_mode()?;
-    execute!(term.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
+    execute!(
+        term.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
     term.show_cursor()?;
 
-    if let Err(e) = res { eprintln!("Error: {e}"); }
+    if let Err(e) = res {
+        eprintln!("Error: {e}");
+    }
     Ok(())
 }
 
 async fn run_app(
-    term:     &mut Terminal<CrosstermBackend<io::Stdout>>,
-    app:      &mut App,
+    term: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    app: &mut App,
     event_rx: &mut mpsc::Receiver<AppEvent>,
 ) -> error::Result<()> {
     loop {
@@ -87,10 +121,10 @@ async fn run_app(
                     app.init_themes(list);
                 }
                 AppEvent::ThemeLoadError(e) => {
-                    app.loading       = false;
+                    app.loading = false;
                     app.message       = format!("failed to fetch themes: {e}\n\ncheck your internet connection.\npress r to retry.");
                     app.message_is_err = true;
-                    app.mode          = Mode::Message;
+                    app.mode = Mode::Message;
                 }
             }
         }
@@ -111,27 +145,36 @@ async fn run_app(
 
         match event::read()? {
             Event::Key(key) => match app.mode {
-                Mode::Normal    => handle_normal(app, key.code, key.modifiers).await,
-                Mode::Search    => handle_search(app, key.code),
-                Mode::Confirm   => handle_confirm(app, key.code),
+                Mode::Normal => handle_normal(app, key.code, key.modifiers).await,
+                Mode::Search => handle_search(app, key.code),
+                Mode::Confirm => handle_confirm(app, key.code),
                 Mode::Immersive => handle_immersive(app, key.code, key.modifiers).await,
-                Mode::Help      => {
+                Mode::Help => {
                     if matches!(key.code, KeyCode::Char('?') | KeyCode::Esc) {
                         app.mode = Mode::Normal;
                     }
                 }
                 Mode::SoftRevert => match key.code {
                     KeyCode::Enter => app.do_soft_revert(),
-                    KeyCode::Esc   => app.mode = Mode::Normal,
-                    _              => {}
+                    KeyCode::Esc => app.mode = Mode::Normal,
+                    _ => {}
                 },
                 Mode::HardRevert => match key.code {
                     KeyCode::Enter => app.do_hard_revert(),
-                    KeyCode::Esc   => app.mode = Mode::Normal,
-                    _              => {}
+                    KeyCode::Esc => app.mode = Mode::Normal,
+                    _ => {}
                 },
-                Mode::Message => { app.mode = Mode::Normal; }
+                Mode::Message => {
+                    app.mode = Mode::Normal;
+                }
             },
+            Event::Mouse(mouse_event) => {
+                if mouse_event.kind == MouseEventKind::ScrollUp {
+                    app.move_up();
+                } else if mouse_event.kind == MouseEventKind::ScrollDown {
+                    app.move_down();
+                }
+            }
             Event::Resize(_, _) => {
                 term.autoresize()?;
                 if !app.preview_output.is_empty() {
@@ -142,7 +185,9 @@ async fn run_app(
             _ => {}
         }
 
-        if app.should_quit { break; }
+        if app.should_quit {
+            break;
+        }
     }
     Ok(())
 }
@@ -160,31 +205,59 @@ async fn handle_normal(app: &mut App, key: KeyCode, mods: KeyModifiers) {
         KeyCode::Char('q') => app.should_quit = true,
         KeyCode::Char('c') if mods.contains(KeyModifiers::CONTROL) => app.should_quit = true,
 
-        KeyCode::Up   | KeyCode::Char('k') => app.move_up(),
+        KeyCode::Up | KeyCode::Char('k') => app.move_up(),
         KeyCode::Down | KeyCode::Char('j') => app.move_down(),
         KeyCode::Char('g') => app.move_top(),
         KeyCode::Char('G') => app.move_bottom(),
-        KeyCode::PageUp    => app.page_up(),
-        KeyCode::PageDown  => app.page_down(),
+        KeyCode::PageUp => app.page_up(),
+        KeyCode::PageDown => app.page_down(),
 
         KeyCode::Char('<') => app.scroll_left(),
         KeyCode::Char('>') => app.scroll_right(),
-        KeyCode::Char('-') => { app.zoom_out(); app.trigger_preview().await; }
-        KeyCode::Char('=') => { app.zoom_in();  app.trigger_preview().await; }
-        KeyCode::Char('0') => { app.zoom_reset(); app.trigger_preview().await; }
+        KeyCode::Char('-') => {
+            app.zoom_out();
+            app.trigger_preview().await;
+        }
+        KeyCode::Char('=') => {
+            app.zoom_in();
+            app.trigger_preview().await;
+        }
+        KeyCode::Char('0') => {
+            app.zoom_reset();
+            app.trigger_preview().await;
+        }
 
         KeyCode::Char('/') => app.mode = Mode::Search,
         KeyCode::Char('?') => app.mode = Mode::Help,
         KeyCode::Char('f') => app.toggle_favourite(),
-        KeyCode::Char('F') => { app.show_favs = !app.show_favs; app.show_recent = false; app.preview_timer = 0; }
-        KeyCode::Char('R') => { app.show_recent = !app.show_recent; app.show_favs = false; app.preview_timer = 0; }
+        KeyCode::Char('F') => {
+            app.show_favs = !app.show_favs;
+            app.show_recent = false;
+            app.preview_timer = 0;
+        }
+        KeyCode::Char('R') => {
+            app.show_recent = !app.show_recent;
+            app.show_favs = false;
+            app.preview_timer = 0;
+        }
         KeyCode::Char('x') => app.random_theme(),
-        KeyCode::Char('r') => { app.start_refresh(); app.preview_timer = 0; }
+        KeyCode::Char('r') => {
+            app.start_refresh();
+            app.preview_timer = 0;
+        }
+
+        KeyCode::Char('n') | KeyCode::Char('N') => {
+            app.hide_font_warning = true;
+            app.save_config();
+        }
 
         KeyCode::Char(' ') => app.trigger_preview().await,
         KeyCode::Char('p') => {
             app.mode = Mode::Immersive;
             app.trigger_immersive_preview().await;
+        }
+        KeyCode::Char('e') => {
+            app.edit_theme().await;
         }
         KeyCode::Enter => {
             if app.selected_theme().is_some() {
@@ -203,7 +276,10 @@ async fn handle_normal(app: &mut App, key: KeyCode, mods: KeyModifiers) {
 
 fn handle_search(app: &mut App, key: KeyCode) {
     match key {
-        KeyCode::Esc => { app.mode = Mode::Normal; app.clear_search(); }
+        KeyCode::Esc => {
+            app.mode = Mode::Normal;
+            app.clear_search();
+        }
         KeyCode::Backspace => {
             app.search_query.pop();
             let q = app.search_query.clone();
@@ -222,8 +298,8 @@ fn handle_search(app: &mut App, key: KeyCode) {
 fn handle_confirm(app: &mut App, key: KeyCode) {
     match key {
         KeyCode::Enter => app.do_apply(),
-        KeyCode::Esc   => app.mode = Mode::Normal,
-        _              => {}
+        KeyCode::Esc => app.mode = Mode::Normal,
+        _ => {}
     }
 }
 
@@ -239,9 +315,9 @@ async fn handle_immersive(app: &mut App, key: KeyCode, mods: KeyModifiers) {
                 app.mode = Mode::Confirm;
             }
         }
-        KeyCode::Enter     => app.imm_submit(),
+        KeyCode::Enter => app.imm_submit(),
         KeyCode::Backspace => app.imm_backspace(),
-        KeyCode::Char(c)   => app.imm_push(c),
+        KeyCode::Char(c) => app.imm_push(c),
         _ => {}
     }
 }

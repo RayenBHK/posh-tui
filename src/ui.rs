@@ -1,12 +1,12 @@
+use crate::app::{App, ImmKind, Mode};
 use ansi_to_tui::IntoText;
 use ratatui::{
-    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
+    Frame,
 };
-use crate::app::{App, ImmKind, Mode};
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
     if app.mode == Mode::Immersive {
@@ -29,17 +29,18 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     draw_statusbar(frame, app, outer[2]);
 
     match app.mode {
-        Mode::Help        => draw_help(frame, area),
-        Mode::Confirm     => draw_confirm(frame, app, area),
-        Mode::SoftRevert  => draw_soft_revert(frame, app, area),
-        Mode::HardRevert  => draw_hard_revert(frame, app, area),
-        Mode::Message     => draw_message(frame, app, area),
-        _                 => {}
+        Mode::Help => draw_help(frame, area),
+        Mode::Confirm => draw_confirm(frame, app, area),
+        Mode::SoftRevert => draw_soft_revert(frame, app, area),
+        Mode::HardRevert => draw_hard_revert(frame, app, area),
+        Mode::Message => draw_message(frame, app, area),
+        _ => {}
     }
 }
 
 fn draw_search(frame: &mut Frame, app: &App, area: Rect) {
-    let is_fav = app.selected_theme()
+    let is_fav = app
+        .selected_theme()
         .map(|t| app.favourites.contains(&t.name))
         .unwrap_or(false);
 
@@ -47,7 +48,7 @@ fn draw_search(frame: &mut Frame, app: &App, area: Rect) {
 
     let applied_label = match &app.last_applied {
         Some(name) => format!(" applied: {name} "),
-        None       => String::new(),
+        None => String::new(),
     };
 
     let _title = if app.show_favs {
@@ -71,7 +72,7 @@ fn draw_search(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     let title = if app.loading {
-    " posh-tui — loading... ".to_string()
+        " posh-tui — loading... ".to_string()
     } else if app.refreshing {
         " posh-tui — refreshing... ".to_string()
     } else if app.show_favs {
@@ -91,17 +92,32 @@ fn draw_search(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_main(frame: &mut Frame, app: &mut App, area: Rect) {
-    let list_pct: u16 = if area.width < 100 { 28 } else { 22 };
+    let mut main_area = area;
+    if !app.hide_font_warning {
+        let v_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(0), Constraint::Length(1)])
+            .split(area);
+        main_area = v_chunks[0];
+
+        let banner = Paragraph::new(
+            " ℹ️  Ensure a Nerd Font is installed in your terminal. Press 'N' to dismiss. ",
+        )
+        .style(Style::default().fg(Color::Black).bg(Color::Yellow));
+        frame.render_widget(banner, v_chunks[1]);
+    }
+
+    let list_pct: u16 = if main_area.width < 100 { 28 } else { 22 };
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
             Constraint::Percentage(list_pct),
             Constraint::Percentage(100 - list_pct),
         ])
-        .split(area);
+        .split(main_area);
 
-    app.preview_width  = chunks[1].width;
-    app.terminal_width = area.width;
+    app.preview_width = chunks[1].width;
+    app.terminal_width = main_area.width;
 
     draw_list(frame, app, chunks[0]);
     draw_preview(frame, app, chunks[1]);
@@ -110,10 +126,14 @@ fn draw_main(frame: &mut Frame, app: &mut App, area: Rect) {
 fn draw_list(frame: &mut Frame, app: &App, area: Rect) {
     // show spinner while loading
     if app.loading || app.refreshing {
-        let spinner_frames = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"];
+        let spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
         let frame_idx = (app.imm_cursor_tick as usize / 3) % spinner_frames.len();
-        let spinner   = spinner_frames[frame_idx];
-        let label     = if app.refreshing { "refreshing..." } else { "loading themes..." };
+        let spinner = spinner_frames[frame_idx];
+        let label = if app.refreshing {
+            "refreshing..."
+        } else {
+            "loading themes..."
+        };
 
         let block = Block::default().borders(Borders::ALL).title(" themes ");
         let inner = block.inner(area);
@@ -127,12 +147,16 @@ fn draw_list(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     let visible = app.visible_themes();
-    let total   = visible.len();
+    let total = visible.len();
 
     let items: Vec<ListItem> = visible
         .iter()
         .map(|t| {
-            let star    = if app.favourites.contains(&t.name) { "★" } else { " " };
+            let star = if app.favourites.contains(&t.name) {
+                "★"
+            } else {
+                " "
+            };
             let applied = match &app.last_applied {
                 Some(name) if name == &t.name => "✓ ",
                 _ => "  ",
@@ -165,7 +189,8 @@ fn draw_list(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_preview(frame: &mut Frame, app: &App, area: Rect) {
-    let theme_name = app.selected_theme()
+    let theme_name = app
+        .selected_theme()
         .map(|t| format!(" preview — {} ", t.name))
         .unwrap_or(" preview ".to_string());
 
@@ -203,35 +228,38 @@ fn draw_preview(frame: &mut Frame, app: &App, area: Rect) {
     let text = app.cached_preview.clone().unwrap_or_default();
 
     // scroll by skipping N chars worth of spans per line — preserves styling
-    let scrolled: Vec<Line> = text.lines.into_iter().map(|line| {
-        let mut remaining_skip = offset;
-        let mut new_spans: Vec<Span<'static>> = Vec::new();
+    let scrolled: Vec<Line> = text
+        .lines
+        .into_iter()
+        .map(|line| {
+            let mut remaining_skip = offset;
+            let mut new_spans: Vec<Span<'static>> = Vec::new();
 
-        for span in line.spans {
-            let content = span.content.to_string();
-            let char_count = content.chars().count();
+            for span in line.spans {
+                let content = span.content.to_string();
+                let char_count = content.chars().count();
 
-            if remaining_skip >= char_count {
-                // skip entire span
-                remaining_skip -= char_count;
-            } else if remaining_skip > 0 {
-                // partial skip — take chars after the offset
-                let visible: String = content.chars().skip(remaining_skip).collect();
-                remaining_skip = 0;
-                if !visible.is_empty() {
-                    new_spans.push(Span::styled(visible, span.style));
+                if remaining_skip >= char_count {
+                    // skip entire span
+                    remaining_skip -= char_count;
+                } else if remaining_skip > 0 {
+                    // partial skip — take chars after the offset
+                    let visible: String = content.chars().skip(remaining_skip).collect();
+                    remaining_skip = 0;
+                    if !visible.is_empty() {
+                        new_spans.push(Span::styled(visible, span.style));
+                    }
+                } else {
+                    // no skip needed — take whole span
+                    new_spans.push(Span::styled(content, span.style));
                 }
-            } else {
-                // no skip needed — take whole span
-                new_spans.push(Span::styled(content, span.style));
             }
-        }
 
-        Line::from(new_spans)
-    }).collect();
+            Line::from(new_spans)
+        })
+        .collect();
 
-    let para = Paragraph::new(Text::from(scrolled))
-        .wrap(Wrap { trim: false });
+    let para = Paragraph::new(Text::from(scrolled)).wrap(Wrap { trim: false });
     frame.render_widget(para, inner);
 
     // scroll position indicator
@@ -244,8 +272,7 @@ fn draw_preview(frame: &mut Frame, app: &App, area: Rect) {
             height: 1,
         };
         frame.render_widget(
-            Paragraph::new(label)
-                .style(Style::default().fg(Color::DarkGray)),
+            Paragraph::new(label).style(Style::default().fg(Color::DarkGray)),
             ind_area,
         );
     }
@@ -262,26 +289,55 @@ fn draw_immersive(frame: &mut Frame, app: &mut App) {
     );
 
     // top hint bar — 1 line
-    let theme_name = app.selected_theme()
+    let theme_name = app
+        .selected_theme()
         .map(|t| t.name.clone())
         .unwrap_or_else(|| "unknown".to_string());
 
     let hint = Line::from(vec![
-        Span::styled(" immersive — ", Style::default().fg(Color::DarkGray).bg(Color::Black)),
-        Span::styled(&*theme_name, Style::default().fg(Color::Green).bg(Color::Black)),
-        Span::styled("   Esc: back", Style::default().fg(Color::DarkGray).bg(Color::Black)),
-        Span::styled("   Ctrl+A: apply", Style::default().fg(Color::Yellow).bg(Color::Black)),
-        Span::styled("   Enter: run command", Style::default().fg(Color::DarkGray).bg(Color::Black)),
-        Span::styled("   type 'help' for commands", Style::default().fg(Color::DarkGray).bg(Color::Black)),
+        Span::styled(
+            " immersive — ",
+            Style::default().fg(Color::DarkGray).bg(Color::Black),
+        ),
+        Span::styled(
+            &*theme_name,
+            Style::default().fg(Color::Green).bg(Color::Black),
+        ),
+        Span::styled(
+            "   Esc: back",
+            Style::default().fg(Color::DarkGray).bg(Color::Black),
+        ),
+        Span::styled(
+            "   Ctrl+A: apply",
+            Style::default().fg(Color::Yellow).bg(Color::Black),
+        ),
+        Span::styled(
+            "   Enter: run command",
+            Style::default().fg(Color::DarkGray).bg(Color::Black),
+        ),
+        Span::styled(
+            "   type 'help' for commands",
+            Style::default().fg(Color::DarkGray).bg(Color::Black),
+        ),
     ]);
-    let hint_area = Rect { x: area.x, y: area.y, width: area.width, height: 1 };
+    let hint_area = Rect {
+        x: area.x,
+        y: area.y,
+        width: area.width,
+        height: 1,
+    };
     frame.render_widget(
         Paragraph::new(hint).style(Style::default().bg(Color::Black)),
         hint_area,
     );
 
     // separator under hint
-    let sep1_area = Rect { x: area.x, y: area.y + 1, width: area.width, height: 1 };
+    let sep1_area = Rect {
+        x: area.x,
+        y: area.y + 1,
+        width: area.width,
+        height: 1,
+    };
     frame.render_widget(
         Paragraph::new("─".repeat(area.width as usize))
             .style(Style::default().fg(Color::DarkGray).bg(Color::Black)),
@@ -290,24 +346,23 @@ fn draw_immersive(frame: &mut Frame, app: &mut App) {
 
     // input line pinned at very bottom
     let cursor_char = if app.imm_cursor_tick < 30 { "█" } else { " " };
-    let input_line  = format!("❯ {}{}", app.imm_input, cursor_char);
-    let input_area  = Rect {
-        x:      area.x,
-        y:      area.y + area.height.saturating_sub(1),
-        width:  area.width,
+    let input_line = format!("❯ {}{}", app.imm_input, cursor_char);
+    let input_area = Rect {
+        x: area.x,
+        y: area.y + area.height.saturating_sub(1),
+        width: area.width,
         height: 1,
     };
     frame.render_widget(
-        Paragraph::new(input_line)
-            .style(Style::default().fg(Color::Green).bg(Color::Black)),
+        Paragraph::new(input_line).style(Style::default().fg(Color::Green).bg(Color::Black)),
         input_area,
     );
 
     // separator above input
     let sep2_area = Rect {
-        x:      area.x,
-        y:      area.y + area.height.saturating_sub(2),
-        width:  area.width,
+        x: area.x,
+        y: area.y + area.height.saturating_sub(2),
+        width: area.width,
         height: 1,
     };
     frame.render_widget(
@@ -318,9 +373,9 @@ fn draw_immersive(frame: &mut Frame, app: &mut App) {
 
     // shell history area — between the two separators
     let history_area = Rect {
-        x:      area.x,
-        y:      area.y + 2,
-        width:  area.width,
+        x: area.x,
+        y: area.y + 2,
+        width: area.width,
         height: area.height.saturating_sub(4), // hint + sep1 + sep2 + input
     };
 
@@ -351,9 +406,11 @@ fn draw_immersive(frame: &mut Frame, app: &mut App) {
                 let parsed = ansi_to_text(&entry.content);
                 for line in parsed.lines {
                     // ensure bg is black
-                    let styled: Vec<Span<'static>> = line.spans.into_iter().map(|s| {
-                        Span::styled(s.content, s.style.bg(Color::Black))
-                    }).collect();
+                    let styled: Vec<Span<'static>> = line
+                        .spans
+                        .into_iter()
+                        .map(|s| Span::styled(s.content, s.style.bg(Color::Black)))
+                        .collect();
                     all_lines.push(Line::from(styled));
                 }
             }
@@ -392,30 +449,87 @@ fn draw_help(frame: &mut Frame, area: Rect) {
     frame.render_widget(Clear, popup);
 
     let lines = vec![
-        Line::from(Span::styled(" posh-tui — keybindings", Style::default().add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled(
+            " posh-tui — keybindings",
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
         Line::from(""),
-        Line::from(vec![Span::styled(" ↑/k  ↓/j   ", Style::default().fg(Color::Yellow)), Span::raw("navigate list")]),
-        Line::from(vec![Span::styled(" g / G      ", Style::default().fg(Color::Yellow)), Span::raw("top / bottom")]),
-        Line::from(vec![Span::styled(" PgUp/PgDn  ", Style::default().fg(Color::Yellow)), Span::raw("page scroll")]),
+        Line::from(vec![
+            Span::styled(" ↑/k  ↓/j   ", Style::default().fg(Color::Yellow)),
+            Span::raw("navigate list"),
+        ]),
+        Line::from(vec![
+            Span::styled(" g / G      ", Style::default().fg(Color::Yellow)),
+            Span::raw("top / bottom"),
+        ]),
+        Line::from(vec![
+            Span::styled(" PgUp/PgDn  ", Style::default().fg(Color::Yellow)),
+            Span::raw("page scroll"),
+        ]),
         Line::from(""),
-        Line::from(vec![Span::styled(" Space      ", Style::default().fg(Color::Green)), Span::raw("preview theme in pane")]),
-        Line::from(vec![Span::styled(" p          ", Style::default().fg(Color::Cyan)),  Span::raw("immersive full-screen preview")]),
-        Line::from(vec![Span::styled(" Enter      ", Style::default().fg(Color::Green)), Span::raw("apply theme to shell")]),
-        Line::from(vec![Span::styled(" u          ", Style::default().fg(Color::Red)),   Span::raw("undo last apply")]),
+        Line::from(vec![
+            Span::styled(" Space      ", Style::default().fg(Color::Green)),
+            Span::raw("preview theme in pane"),
+        ]),
+        Line::from(vec![
+            Span::styled(" p          ", Style::default().fg(Color::Cyan)),
+            Span::raw("immersive full-screen preview"),
+        ]),
+        Line::from(vec![
+            Span::styled(" Enter      ", Style::default().fg(Color::Green)),
+            Span::raw("apply theme to shell"),
+        ]),
+        Line::from(vec![
+            Span::styled(" u          ", Style::default().fg(Color::Red)),
+            Span::raw("undo last apply"),
+        ]),
         Line::from(""),
-        Line::from(vec![Span::styled(" < / >      ", Style::default().fg(Color::Cyan)),  Span::raw("scroll preview left / right")]),
-        Line::from(vec![Span::styled(" - / =      ", Style::default().fg(Color::Cyan)),  Span::raw("zoom out / in")]),
-        Line::from(vec![Span::styled(" 0          ", Style::default().fg(Color::Cyan)),  Span::raw("reset zoom")]),
+        Line::from(vec![
+            Span::styled(" < / >      ", Style::default().fg(Color::Cyan)),
+            Span::raw("scroll preview left / right"),
+        ]),
+        Line::from(vec![
+            Span::styled(" - / =      ", Style::default().fg(Color::Cyan)),
+            Span::raw("zoom out / in"),
+        ]),
+        Line::from(vec![
+            Span::styled(" 0          ", Style::default().fg(Color::Cyan)),
+            Span::raw("reset zoom"),
+        ]),
         Line::from(""),
-        Line::from(vec![Span::styled(" f          ", Style::default().fg(Color::Cyan)),  Span::raw("toggle favourite")]),
-        Line::from(vec![Span::styled(" F          ", Style::default().fg(Color::Cyan)),  Span::raw("favourites view")]),
-        Line::from(vec![Span::styled(" R          ", Style::default().fg(Color::Cyan)),  Span::raw("recently viewed")]),
-        Line::from(vec![Span::styled(" x          ", Style::default().fg(Color::Cyan)),  Span::raw("random theme")]),
-        Line::from(vec![Span::styled(" /          ", Style::default().fg(Color::Cyan)),  Span::raw("search themes")]),
-        Line::from(vec![Span::styled(" r          ", Style::default().fg(Color::Cyan)),  Span::raw("refresh theme list from GitHub")]),
+        Line::from(vec![
+            Span::styled(" f          ", Style::default().fg(Color::Cyan)),
+            Span::raw("toggle favourite"),
+        ]),
+        Line::from(vec![
+            Span::styled(" F          ", Style::default().fg(Color::Cyan)),
+            Span::raw("favourites view"),
+        ]),
+        Line::from(vec![
+            Span::styled(" R          ", Style::default().fg(Color::Cyan)),
+            Span::raw("recently viewed"),
+        ]),
+        Line::from(vec![
+            Span::styled(" x          ", Style::default().fg(Color::Cyan)),
+            Span::raw("random theme"),
+        ]),
+        Line::from(vec![
+            Span::styled(" /          ", Style::default().fg(Color::Cyan)),
+            Span::raw("search themes"),
+        ]),
+        Line::from(vec![
+            Span::styled(" r          ", Style::default().fg(Color::Cyan)),
+            Span::raw("refresh theme list from GitHub"),
+        ]),
         Line::from(""),
-        Line::from(vec![Span::styled(" ?          ", Style::default().fg(Color::DarkGray)), Span::raw("toggle help")]),
-        Line::from(vec![Span::styled(" q / Ctrl+C ", Style::default().fg(Color::DarkGray)), Span::raw("quit")]),
+        Line::from(vec![
+            Span::styled(" ?          ", Style::default().fg(Color::DarkGray)),
+            Span::raw("toggle help"),
+        ]),
+        Line::from(vec![
+            Span::styled(" q / Ctrl+C ", Style::default().fg(Color::DarkGray)),
+            Span::raw("quit"),
+        ]),
     ];
 
     frame.render_widget(
@@ -430,7 +544,8 @@ fn draw_confirm(frame: &mut Frame, app: &App, area: Rect) {
     let popup = centered_rect(50, 45, area);
     frame.render_widget(Clear, popup);
 
-    let name = app.selected_theme()
+    let name = app
+        .selected_theme()
         .map(|t| t.name.clone())
         .unwrap_or_else(|| "unknown".into());
 
@@ -446,21 +561,24 @@ fn draw_confirm(frame: &mut Frame, app: &App, area: Rect) {
     let theme_path = app.cache_dir.join(
         app.selected_theme()
             .map(|t| t.filename.as_str())
-            .unwrap_or("")
+            .unwrap_or(""),
     );
 
     let init_line = match &app.shell_info {
         Some(i) => i.shell.init_line(&theme_path),
-        None    => String::new(),
+        None => String::new(),
     };
 
     let lines = vec![
         Line::from(""),
         Line::from(vec![
             Span::raw("  Apply theme: "),
-            Span::styled(&*name, Style::default()
-                .fg(Color::Green)
-                .add_modifier(Modifier::BOLD)),
+            Span::styled(
+                &*name,
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
         ]),
         Line::from(""),
         Line::from(vec![
@@ -491,7 +609,11 @@ fn draw_confirm(frame: &mut Frame, app: &App, area: Rect) {
 
     frame.render_widget(
         Paragraph::new(lines)
-            .block(Block::default().borders(Borders::ALL).title(" apply theme "))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" apply theme "),
+            )
             .wrap(Wrap { trim: false }),
         popup,
     );
@@ -503,15 +625,18 @@ fn draw_soft_revert(frame: &mut Frame, app: &App, area: Rect) {
 
     let (rc, has) = match &app.shell_info {
         Some(i) => (i.rc_path.display().to_string(), i.has_managed),
-        None    => ("unknown".into(), false),
+        None => ("unknown".into(), false),
     };
 
     let lines = if has {
         vec![
             Line::from(""),
-            Line::from(vec![
-                Span::styled("  Soft revert", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            ]),
+            Line::from(vec![Span::styled(
+                "  Soft revert",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            )]),
             Line::from(""),
             Line::from(vec![
                 Span::styled("  Removes: ", Style::default().fg(Color::DarkGray)),
@@ -568,7 +693,11 @@ fn draw_soft_revert(frame: &mut Frame, app: &App, area: Rect) {
 
     frame.render_widget(
         Paragraph::new(lines)
-            .block(Block::default().borders(Borders::ALL).title(" soft revert "))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" soft revert "),
+            )
             .wrap(Wrap { trim: false }),
         popup,
     );
@@ -580,16 +709,15 @@ fn draw_hard_revert(frame: &mut Frame, app: &App, area: Rect) {
 
     let rc = match &app.shell_info {
         Some(i) => i.rc_path.display().to_string(),
-        None    => "unknown".into(),
+        None => "unknown".into(),
     };
 
     let mut lines = vec![
         Line::from(""),
-        Line::from(vec![
-            Span::styled("  ⚠ Hard revert", Style::default()
-                .fg(Color::Red)
-                .add_modifier(Modifier::BOLD)),
-        ]),
+        Line::from(vec![Span::styled(
+            "  ⚠ Hard revert",
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        )]),
         Line::from(""),
         Line::from(Span::styled(
             "  Removes ALL oh-my-posh lines, including",
@@ -623,10 +751,7 @@ fn draw_hard_revert(frame: &mut Frame, app: &App, area: Rect) {
                     format!("    line {num}: "),
                     Style::default().fg(Color::DarkGray),
                 ),
-                Span::styled(
-                    content.clone(),
-                    Style::default().fg(Color::Red),
-                ),
+                Span::styled(content.clone(), Style::default().fg(Color::Red)),
             ]));
         }
     }
@@ -641,7 +766,11 @@ fn draw_hard_revert(frame: &mut Frame, app: &App, area: Rect) {
 
     frame.render_widget(
         Paragraph::new(lines)
-            .block(Block::default().borders(Borders::ALL).title(" hard revert "))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" hard revert "),
+            )
             .wrap(Wrap { trim: false }),
         popup,
     );
@@ -651,14 +780,23 @@ fn draw_message(frame: &mut Frame, app: &App, area: Rect) {
     let popup = centered_rect(48, 38, area);
     frame.render_widget(Clear, popup);
 
-    let color = if app.message_is_err { Color::Red } else { Color::Green };
-    let title  = if app.message_is_err { " error " } else { " done " };
+    let color = if app.message_is_err {
+        Color::Red
+    } else {
+        Color::Green
+    };
+    let title = if app.message_is_err {
+        " error "
+    } else {
+        " done "
+    };
 
     let mut lines = vec![Line::from("")];
     for l in app.message.lines() {
-        lines.push(Line::from(
-            Span::styled(format!("  {l}"), Style::default().fg(color))
-        ));
+        lines.push(Line::from(Span::styled(
+            format!("  {l}"),
+            Style::default().fg(color),
+        )));
     }
     lines.push(Line::from(""));
     lines.push(Line::from(vec![
@@ -673,7 +811,6 @@ fn draw_message(frame: &mut Frame, app: &App, area: Rect) {
         popup,
     );
 }
-
 
 pub fn ansi_to_text(s: &str) -> Text<'static> {
     s.to_string().into_text().unwrap_or_default()
@@ -696,4 +833,55 @@ fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
             Constraint::Percentage((100 - percent_x) / 2),
         ])
         .split(v[1])[1]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::App;
+    use crate::themes::Theme;
+    use ratatui::{backend::TestBackend, Terminal};
+    use std::path::PathBuf;
+
+    #[tokio::test]
+    async fn test_ui_snapshot() {
+        let themes = vec![
+            Theme {
+                name: "theme1".to_string(),
+                filename: "theme1.json".to_string(),
+                local: None,
+                raw_url: "".into(),
+            },
+            Theme {
+                name: "theme2".to_string(),
+                filename: "theme2.json".to_string(),
+                local: None,
+                raw_url: "".into(),
+            },
+        ];
+        let mut app = App::new(themes, PathBuf::from("/tmp"));
+        app.selected = 0;
+        app.search_query = "".to_string();
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|f| {
+                draw(f, &mut app);
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+
+        let mut content = String::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                content.push_str(buffer.cell((x, y)).unwrap().symbol());
+            }
+            content.push('\n');
+        }
+
+        insta::assert_snapshot!(content);
+    }
 }

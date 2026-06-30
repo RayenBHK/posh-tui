@@ -1,9 +1,9 @@
-use std::path::{Path, PathBuf};
 use crate::error::{PoshError, Result};
+use std::path::{Path, PathBuf};
 
 const MARKER_START: &str = "# posh-tui:start";
-const MARKER_END:   &str = "# posh-tui:end";
-const BACKUP_EXT:   &str = ".posh-tui.bak";
+const MARKER_END: &str = "# posh-tui:end";
+const BACKUP_EXT: &str = ".posh-tui.bak";
 
 #[derive(Debug, Clone)]
 pub enum Shell {
@@ -20,7 +20,7 @@ impl Shell {
 
         Ok(match shell.as_str() {
             s if s.ends_with("bash") => Shell::Bash,
-            s if s.ends_with("zsh")  => Shell::Zsh,
+            s if s.ends_with("zsh") => Shell::Zsh,
             s if s.ends_with("fish") => Shell::Fish,
             other => Shell::Unknown(other.to_string()),
         })
@@ -28,9 +28,9 @@ impl Shell {
 
     pub fn name(&self) -> &str {
         match self {
-            Shell::Bash       => "bash",
-            Shell::Zsh        => "zsh",
-            Shell::Fish       => "fish",
+            Shell::Bash => "bash",
+            Shell::Zsh => "zsh",
+            Shell::Fish => "fish",
             Shell::Unknown(s) => s.as_str(),
         }
     }
@@ -40,12 +40,14 @@ impl Shell {
             .ok_or_else(|| PoshError::Shell("cannot find home directory".into()))?;
 
         let path = match self {
-            Shell::Bash       => home.join(".bashrc"),
-            Shell::Zsh        => home.join(".zshrc"),
-            Shell::Fish       => home.join(".config").join("fish").join("config.fish"),
-            Shell::Unknown(s) => return Err(PoshError::Shell(
-                format!("unsupported shell: {s} — edit your rc file manually")
-            )),
+            Shell::Bash => home.join(".bashrc"),
+            Shell::Zsh => home.join(".zshrc"),
+            Shell::Fish => home.join(".config").join("fish").join("config.fish"),
+            Shell::Unknown(s) => {
+                return Err(PoshError::Shell(format!(
+                    "unsupported shell: {s} — edit your rc file manually"
+                )))
+            }
         };
 
         Ok(path)
@@ -56,9 +58,7 @@ impl Shell {
         let omp_bin = which_omp();
         let path_str = theme_path.display();
         match self {
-            Shell::Fish => format!(
-                "{omp_bin} init fish --config {path_str} | source"
-            ),
+            Shell::Fish => format!("{omp_bin} init fish --config {path_str} | source"),
             _ => format!(
                 "eval \"$({omp_bin} init {} --config {path_str})\"",
                 self.name()
@@ -71,36 +71,43 @@ impl Shell {
 
 #[derive(Debug, Clone)]
 pub struct ShellInfo {
-    pub shell:       Shell,
-    pub rc_path:     PathBuf,
-    pub has_managed: bool,   // posh-tui:start block exists
+    pub shell: Shell,
+    pub rc_path: PathBuf,
+    pub has_managed: bool, // posh-tui:start block exists
     #[allow(dead_code)]
-    pub has_any_omp: bool,   // any oh-my-posh line exists (for hard revert)
+    pub has_any_omp: bool, // any oh-my-posh line exists (for hard revert)
     pub backup_path: PathBuf,
 }
 
 impl ShellInfo {
     pub fn load() -> Result<Self> {
-        let shell      = Shell::detect()?;
-        let rc_path    = shell.rc_path()?;
+        let shell = Shell::detect()?;
+        let rc_path = shell.rc_path()?;
         let backup_path = backup_path_for(&rc_path);
 
         let (has_managed, has_any_omp) = if rc_path.exists() {
             let contents = std::fs::read_to_string(&rc_path)?;
-            let has_managed  = contents.contains(MARKER_START);
-            let has_any_omp  = contents.lines().any(|l| l.contains("oh-my-posh"));
+            let has_managed = contents.contains(MARKER_START);
+            let has_any_omp = contents.lines().any(|l| l.contains("oh-my-posh"));
             (has_managed, has_any_omp)
         } else {
             (false, false)
         };
 
-        Ok(Self { shell, rc_path, has_managed, has_any_omp, backup_path })
+        Ok(Self {
+            shell,
+            rc_path,
+            has_managed,
+            has_any_omp,
+            backup_path,
+        })
     }
 }
 
 fn backup_path_for(rc_path: &Path) -> PathBuf {
     let mut p = rc_path.to_path_buf();
-    let name  = p.file_name()
+    let name = p
+        .file_name()
         .unwrap_or_default()
         .to_string_lossy()
         .to_string();
@@ -116,8 +123,8 @@ pub fn apply_theme(info: &ShellInfo, theme_path: &Path) -> Result<()> {
     backup(&info.rc_path, &info.backup_path)?;
 
     let init_line = info.shell.init_line(theme_path);
-    let block     = format!("{MARKER_START}\n{init_line}\n{MARKER_END}");
-    let new       = if info.has_managed {
+    let block = format!("{MARKER_START}\n{init_line}\n{MARKER_END}");
+    let new = if info.has_managed {
         replace_managed_block(&contents, &block)
     } else {
         format!("{}\n\n{}\n", contents.trim_end(), block)
@@ -131,7 +138,7 @@ pub fn apply_theme(info: &ShellInfo, theme_path: &Path) -> Result<()> {
 pub fn soft_revert(info: &ShellInfo) -> Result<()> {
     if !info.has_managed {
         return Err(PoshError::Shell(
-            "no posh-tui managed block found in your rc file".into()
+            "no posh-tui managed block found in your rc file".into(),
         ));
     }
 
@@ -156,9 +163,7 @@ pub fn hard_revert(info: &ShellInfo) -> Result<usize> {
 /// Restore backup file.
 pub fn undo(info: &ShellInfo) -> Result<()> {
     if !info.backup_path.exists() {
-        return Err(PoshError::Shell(
-            "no backup found — nothing to undo".into()
-        ));
+        return Err(PoshError::Shell("no backup found — nothing to undo".into()));
     }
     std::fs::copy(&info.backup_path, &info.rc_path)?;
     Ok(())
@@ -194,7 +199,7 @@ fn backup(src: &PathBuf, dest: &PathBuf) -> Result<()> {
 }
 
 fn replace_managed_block(contents: &str, new_block: &str) -> String {
-    let mut out    = String::new();
+    let mut out = String::new();
     let mut inside = false;
 
     for line in contents.lines() {
@@ -217,12 +222,18 @@ fn replace_managed_block(contents: &str, new_block: &str) -> String {
 }
 
 fn remove_managed_block(contents: &str) -> String {
-    let mut out    = String::new();
+    let mut out = String::new();
     let mut inside = false;
 
     for line in contents.lines() {
-        if line.trim() == MARKER_START { inside = true;  continue; }
-        if line.trim() == MARKER_END   { inside = false; continue; }
+        if line.trim() == MARKER_START {
+            inside = true;
+            continue;
+        }
+        if line.trim() == MARKER_END {
+            inside = false;
+            continue;
+        }
         if !inside {
             out.push_str(line);
             out.push('\n');
@@ -233,14 +244,22 @@ fn remove_managed_block(contents: &str) -> String {
 }
 
 fn remove_all_omp_lines(contents: &str) -> (String, usize) {
-    let mut out     = String::new();
+    let mut out = String::new();
     let mut removed = 0usize;
-    let mut inside  = false;
+    let mut inside = false;
 
     for line in contents.lines() {
         // skip managed block markers too
-        if line.trim() == MARKER_START { inside = true;  removed += 1; continue; }
-        if line.trim() == MARKER_END   { inside = false; removed += 1; continue; }
+        if line.trim() == MARKER_START {
+            inside = true;
+            removed += 1;
+            continue;
+        }
+        if line.trim() == MARKER_END {
+            inside = false;
+            removed += 1;
+            continue;
+        }
         if inside || line.contains("oh-my-posh") {
             removed += 1;
             continue;
@@ -251,11 +270,10 @@ fn remove_all_omp_lines(contents: &str) -> (String, usize) {
     (format!("{}\n", out.trim_end()), removed)
 }
 
-
 fn which_omp() -> String {
     // try to resolve the full path of oh-my-posh binary
     let candidates = [
-        "/home/pavilion/.local/bin/oh-my-posh",  // fallback hardcode
+        "/home/pavilion/.local/bin/oh-my-posh", // fallback hardcode
         "/usr/local/bin/oh-my-posh",
         "/usr/bin/oh-my-posh",
     ];
@@ -291,7 +309,8 @@ mod tests {
     #[test]
     fn replace_managed_block_replaces_existing() {
         let contents = "# header\n\n# posh-tui:start\neval \"$(oh-my-posh init bash --config old)\"\n# posh-tui:end\n# footer\n";
-        let new_block = "# posh-tui:start\neval \"$(oh-my-posh init bash --config new)\"\n# posh-tui:end";
+        let new_block =
+            "# posh-tui:start\neval \"$(oh-my-posh init bash --config new)\"\n# posh-tui:end";
         let result = replace_managed_block(contents, new_block);
         assert!(result.contains("config new"));
         assert!(!result.contains("config old"));
@@ -303,7 +322,8 @@ mod tests {
     #[test]
     fn replace_managed_block_appends_when_no_block() {
         let contents = "# header\n# some config\n";
-        let new_block = "# posh-tui:start\neval \"$(oh-my-posh init bash --config test)\"\n# posh-tui:end";
+        let new_block =
+            "# posh-tui:start\neval \"$(oh-my-posh init bash --config test)\"\n# posh-tui:end";
         let result = replace_managed_block(contents, new_block);
         // replace_managed_block only replaces — it doesn't add a block that doesn't exist
         assert!(result.contains("# header"));
@@ -414,6 +434,54 @@ mod tests {
     fn backup_path_for_fish_config() {
         let rc = PathBuf::from("/home/user/.config/fish/config.fish");
         let bak = backup_path_for(&rc);
-        assert_eq!(bak, PathBuf::from("/home/user/.config/fish/config.fish.posh-tui.bak"));
+        assert_eq!(
+            bak,
+            PathBuf::from("/home/user/.config/fish/config.fish.posh-tui.bak")
+        );
+    }
+
+    // ── end-to-end file system tests ───────────────────────────────────────
+
+    #[test]
+    fn e2e_apply_and_undo() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let rc_path = temp_dir.path().join(".bashrc");
+        let backup_path = backup_path_for(&rc_path);
+
+        // Create initial fake .bashrc
+        let initial_content = "# My fake bashrc\nexport PATH=/usr/bin\n";
+        std::fs::write(&rc_path, initial_content).unwrap();
+
+        let info = ShellInfo {
+            shell: Shell::Bash,
+            rc_path: rc_path.clone(),
+            has_managed: false,
+            has_any_omp: false,
+            backup_path: backup_path.clone(),
+        };
+
+        let fake_theme_path = temp_dir.path().join("mytheme.json");
+
+        // Apply theme
+        apply_theme(&info, &fake_theme_path).unwrap();
+
+        // Verify .bashrc was modified
+        let new_content = std::fs::read_to_string(&rc_path).unwrap();
+        assert!(new_content.contains(MARKER_START));
+        assert!(new_content.contains("mytheme.json"));
+        assert!(new_content.contains(MARKER_END));
+        assert!(new_content.starts_with(initial_content.trim_end()));
+
+        // Verify backup was created
+        assert!(backup_path.exists());
+        let backup_content = std::fs::read_to_string(&backup_path).unwrap();
+        assert_eq!(backup_content, initial_content);
+
+        // Undo
+        undo(&info).unwrap();
+
+        // Verify reverted content
+        let reverted_content = std::fs::read_to_string(&rc_path).unwrap();
+        assert_eq!(reverted_content, initial_content);
     }
 }

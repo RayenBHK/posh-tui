@@ -1,6 +1,6 @@
 [package]
 name = "posh-tui"
-version = "0.2.0"
+version = "0.4.0"
 description = "A terminal UI for browsing, previewing, and applying Oh My Posh themes"
 license = "MIT"
 repository = "https://github.com/RayenBHK/posh-tui"
@@ -13,6 +13,8 @@ name = "posh-tui"
 path = "src/main.rs"
 
 [dependencies]
+clap       = { version = "4.5", features = ["derive"] }
+clap_complete = "4.5"
 ratatui    = "0.29"
 crossterm  = "0.28"
 tokio      = { version = "1", features = ["full"] }
@@ -24,6 +26,11 @@ dirs-next  = "2"
 nucleo     = "0.5"
 ansi-to-tui = "7"
 rand       = "0.9"
+
+[dev-dependencies]
+tempfile   = "3.10"
+wiremock = "0.6.5"
+insta = "1.39"
 
 [profile.release]
 opt-level = 3

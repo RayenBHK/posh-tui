@@ -1,4 +1,7 @@
-use nucleo::{Config, Nucleo, pattern::{CaseMatching, Normalization}};
+use nucleo::{
+    pattern::{CaseMatching, Normalization},
+    Config, Nucleo,
+};
 use std::sync::Arc;
 
 pub struct FuzzySearch {
@@ -7,12 +10,7 @@ pub struct FuzzySearch {
 
 impl FuzzySearch {
     pub fn new(items: Vec<String>) -> Self {
-        let matcher = Nucleo::new(
-            Config::DEFAULT,
-            Arc::new(|| {}),
-            None,
-            1,
-        );
+        let matcher = Nucleo::new(Config::DEFAULT, Arc::new(|| {}), None, 1);
 
         let injector = matcher.injector();
         for item in items {
@@ -28,17 +26,15 @@ impl FuzzySearch {
     }
 
     pub fn query(&mut self, query: &str) -> Vec<String> {
-        self.matcher.pattern.reparse(
-            0,
-            query,
-            CaseMatching::Ignore,
-            Normalization::Smart,
-            false,
-        );
+        self.matcher
+            .pattern
+            .reparse(0, query, CaseMatching::Ignore, Normalization::Smart, false);
 
         loop {
             let status = self.matcher.tick(10);
-            if !status.running { break; }
+            if !status.running {
+                break;
+            }
         }
 
         let snapshot = self.matcher.snapshot();

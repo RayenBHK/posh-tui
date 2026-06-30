@@ -10,11 +10,13 @@ A terminal UI for browsing, previewing, and applying [Oh My Posh](https://ohmypo
 
 ## What it does
 
-- Browse all 120+ Oh My Posh themes in a scrollable list
+- Browse all 120+ Oh My Posh themes in a scrollable list (with full mouse support)
 - **Live ANSI preview** — calls the real `oh-my-posh` binary, renders the actual prompt with full colors
 - **Immersive mode** — full-screen preview at true terminal width with a fake interactive shell
+- **Live Theme Editing** — drop into your `$EDITOR` to tweak a theme and see it reload instantly
 - Apply a theme directly to your shell config (`~/.bashrc`, `~/.zshrc`, `~/.config/fish/config.fish`)
-- Undo, soft revert, and hard revert — always backs up before touching anything
+- Safe by default: `--dry-run` support and always backs up before touching anything
+- Undo, soft revert, and hard revert capabilities
 - Fuzzy search powered by [nucleo](https://github.com/helix-editor/nucleo)
 - Persistent favourites and last-applied theme across sessions
 
@@ -61,6 +63,12 @@ cargo build --release
 posh-tui
 ```
 
+You can also run with options:
+```bash
+posh-tui --dry-run
+posh-tui --generate-completions bash > ~/.local/share/bash-completion/completions/posh-tui
+```
+
 The app opens instantly. Themes are fetched from GitHub in the background.
 
 ---
@@ -104,6 +112,7 @@ Try typing: `ls`, `git status`, `git log`, `neofetch`, `pwd`, `help`
 | `u` | Undo last apply (restores backup) |
 | `U` | Soft revert — remove posh-tui block only |
 | `Ctrl+U` | Hard revert — remove all oh-my-posh lines |
+| `e` | Edit selected theme in `$EDITOR` |
 | `f` | Toggle favourite |
 | `F` | Toggle favourites-only view |
 | `R` | Toggle recently viewed |
@@ -111,6 +120,7 @@ Try typing: `ls`, `git status`, `git log`, `neofetch`, `pwd`, `help`
 | `/` | Fuzzy search |
 | `?` | Help overlay |
 | `q` | Quit |
+| `Scroll` | Scroll up/down the theme list |
 
 ---
 
@@ -149,6 +159,8 @@ Open a new terminal to see the theme. Press `u` to undo at any time.
 - [reqwest](https://github.com/seanmonstar/reqwest) — HTTP client
 - [nucleo](https://github.com/helix-editor/nucleo) — fuzzy search
 - [serde](https://serde.rs) — serialisation
+- [clap](https://docs.rs/clap) — CLI argument parsing
+- [insta](https://insta.rs) — UI snapshot testing
 
 ---
 

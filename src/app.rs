@@ -1,14 +1,14 @@
-use std::path::PathBuf;
-use rand::Rng;
-use crate::themes::Theme;
+use crate::config::Config;
 use crate::preview::PreviewWorker;
 use crate::search::FuzzySearch;
 use crate::shell::ShellInfo;
-use crate::config::Config;
+use crate::themes::Theme;
 use crate::ui::ansi_to_text;
+use crossterm::ExecutableCommand;
+use rand::Rng;
+use std::path::PathBuf;
 
 const PREVIEW_DEBOUNCE: u8 = 5; // ~165ms at 30fps
-
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Mode {
@@ -17,119 +17,125 @@ pub enum Mode {
     Confirm,
     Help,
     Immersive,
-    SoftRevert,   // U — remove posh-tui block
-    HardRevert,   // Ctrl+U — remove all omp lines
-    Message,      // show result of an operation
+    SoftRevert, // U — remove posh-tui block
+    HardRevert, // Ctrl+U — remove all omp lines
+    Message,    // show result of an operation
 }
 
 pub struct App {
-    pub themes:           Vec<Theme>,
-    pub filtered:         Vec<usize>,
-    pub selected:         usize,
-    pub mode:             Mode,
-    pub search_query:     String,
-    pub preview_output:   String,
-    pub cached_preview:   Option<ratatui::text::Text<'static>>,
-    pub preview_loading:  bool,
-    pub show_favs:        bool,
-    pub show_recent:      bool,
-    pub favourites:       std::collections::HashSet<String>,
-    pub last_applied:     Option<String>,
-    pub should_quit:      bool,
-    pub cache_dir:        PathBuf,
-    pub worker:           PreviewWorker,
-    pub preview_width:    u16,
-    pub terminal_width:   u16,
+    pub themes: Vec<Theme>,
+    pub filtered: Vec<usize>,
+    pub selected: usize,
+    pub mode: Mode,
+    pub search_query: String,
+    pub preview_output: String,
+    pub cached_preview: Option<ratatui::text::Text<'static>>,
+    pub preview_loading: bool,
+    pub show_favs: bool,
+    pub show_recent: bool,
+    pub favourites: std::collections::HashSet<String>,
+    pub last_applied: Option<String>,
+    pub hide_font_warning: bool,
+    pub should_quit: bool,
+    pub cache_dir: PathBuf,
+    pub worker: PreviewWorker,
+    pub preview_width: u16,
+    pub terminal_width: u16,
     // scroll & zoom
-    pub scroll_offset:    u16,
-    pub zoom_factor:      f32,   // 1.0 = natural, 1.5 = compressed to 66%
+    pub scroll_offset: u16,
+    pub zoom_factor: f32, // 1.0 = natural, 1.5 = compressed to 66%
     // auto-preview debounce (ticks, ~33 ms each)
-    pub preview_timer:    u8,
+    pub preview_timer: u8,
     // immersive mode
-    pub imm_input:        String,
-    pub imm_history:      Vec<ImmLine>,
-    pub imm_cursor_tick:  u8,
+    pub imm_input: String,
+    pub imm_history: Vec<ImmLine>,
+    pub imm_cursor_tick: u8,
     pub fuzzy: FuzzySearch,
-    pub shell_info:      Option<ShellInfo>,
-    pub message:         String,   // shown in Message mode
-    pub message_is_err:  bool,
+    pub shell_info: Option<ShellInfo>,
+    pub message: String, // shown in Message mode
+    pub message_is_err: bool,
     pub hard_revert_preview: Vec<(usize, String)>,
     pub config: Config,
-    pub loading:    bool,
+    pub loading: bool,
     pub refreshing: bool,
     pub refresh_rx: Option<tokio::sync::mpsc::Receiver<Vec<Theme>>>,
+    pub dry_run: bool,
 }
 
 #[derive(Clone)]
 pub struct ImmLine {
-    pub kind:    ImmKind,
+    pub kind: ImmKind,
     pub content: String,
 }
 
 #[derive(Clone, PartialEq)]
 pub enum ImmKind {
-    Prompt,   // the oh-my-posh rendered prompt line
-    Input,    // what the user typed
-    Output,   // fake command output
+    Prompt, // the oh-my-posh rendered prompt line
+    Input,  // what the user typed
+    Output, // fake command output
 }
 
 impl App {
-pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
-    let filtered    = (0..themes.len()).collect();
-    let theme_names: Vec<String> = themes.iter().map(|t| t.name.clone()).collect();
-    let config      = Config::load();
+    pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
+        let filtered = (0..themes.len()).collect();
+        let theme_names: Vec<String> = themes.iter().map(|t| t.name.clone()).collect();
+        let config = Config::load();
 
-    // restore saved state
-    let favourites  = config.favourites.clone();
-    let zoom_factor = config.zoom_factor;
-    let last_applied = config.last_applied.clone();
+        // restore saved state
+        let favourites = config.favourites.clone();
+        let zoom_factor = config.zoom_factor;
+        let last_applied = config.last_applied.clone();
+        let hide_font_warning = config.hide_font_warning;
 
-    // find index of last applied theme so we can scroll to it
-    let selected = last_applied.as_ref()
-        .and_then(|name| themes.iter().position(|t| &t.name == name))
-        .unwrap_or(0);
+        // find index of last applied theme so we can scroll to it
+        let selected = last_applied
+            .as_ref()
+            .and_then(|name| themes.iter().position(|t| &t.name == name))
+            .unwrap_or(0);
 
-    Self {
-        themes,
-        filtered,
-        selected,
-        mode: Mode::Normal,
-        search_query: String::new(),
-        preview_output: String::new(),
-        cached_preview: None,
-        preview_loading: false,
-        show_favs: false,
-        show_recent: false,
-        favourites,
-        last_applied,
-        should_quit: false,
-        cache_dir,
-        worker: PreviewWorker::spawn(),
-        preview_width: 80,
-        terminal_width: 80,
-        scroll_offset: 0,
-        zoom_factor,
-        preview_timer: 0,
-        imm_input: String::new(),
-        imm_history: Vec::new(),
-        imm_cursor_tick: 0,
-        fuzzy: FuzzySearch::new(theme_names),
-        shell_info: None,
-        message: String::new(),
-        message_is_err: false,
-        hard_revert_preview: Vec::new(),
-        config,
-        loading:    false,
-        refreshing: false,
-        refresh_rx: None,
+        Self {
+            themes,
+            filtered,
+            selected,
+            mode: Mode::Normal,
+            search_query: String::new(),
+            preview_output: String::new(),
+            cached_preview: None,
+            preview_loading: false,
+            show_favs: false,
+            show_recent: false,
+            favourites,
+            last_applied,
+            hide_font_warning,
+            should_quit: false,
+            cache_dir,
+            worker: PreviewWorker::spawn(),
+            preview_width: 80,
+            terminal_width: 80,
+            scroll_offset: 0,
+            zoom_factor,
+            preview_timer: 0,
+            imm_input: String::new(),
+            imm_history: Vec::new(),
+            imm_cursor_tick: 0,
+            fuzzy: FuzzySearch::new(theme_names),
+            shell_info: None,
+            message: String::new(),
+            message_is_err: false,
+            hard_revert_preview: Vec::new(),
+            config,
+            loading: false,
+            refreshing: false,
+            refresh_rx: None,
+            dry_run: false,
+        }
     }
-}
-
 
     pub fn save_config(&mut self) {
-        self.config.favourites   = self.favourites.clone();
-        self.config.zoom_factor  = self.zoom_factor;
+        self.config.favourites = self.favourites.clone();
+        self.config.zoom_factor = self.zoom_factor;
         self.config.last_applied = self.last_applied.clone();
+        self.config.hide_font_warning = self.hide_font_warning;
 
         if let Err(e) = self.config.save() {
             // non-fatal — just show a brief message
@@ -142,7 +148,9 @@ pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
     }
 
     pub fn move_up(&mut self) {
-        if self.selected > 0 { self.selected -= 1; }
+        if self.selected > 0 {
+            self.selected -= 1;
+        }
         self.scroll_offset = 0;
         self.preview_timer = PREVIEW_DEBOUNCE;
     }
@@ -155,10 +163,16 @@ pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
         self.preview_timer = PREVIEW_DEBOUNCE;
     }
 
-    pub fn move_top(&mut self)    { self.selected = 0; self.scroll_offset = 0; self.preview_timer = PREVIEW_DEBOUNCE; }
+    pub fn move_top(&mut self) {
+        self.selected = 0;
+        self.scroll_offset = 0;
+        self.preview_timer = PREVIEW_DEBOUNCE;
+    }
     pub fn move_bottom(&mut self) {
         let len = self.visible_themes().len();
-        if len > 0 { self.selected = len - 1; }
+        if len > 0 {
+            self.selected = len - 1;
+        }
         self.scroll_offset = 0;
         self.preview_timer = PREVIEW_DEBOUNCE;
     }
@@ -176,8 +190,12 @@ pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
         self.preview_timer = PREVIEW_DEBOUNCE;
     }
 
-    pub fn scroll_left(&mut self)  { self.scroll_offset = self.scroll_offset.saturating_sub(4); }
-    pub fn scroll_right(&mut self) { self.scroll_offset = self.scroll_offset.saturating_add(4); }
+    pub fn scroll_left(&mut self) {
+        self.scroll_offset = self.scroll_offset.saturating_sub(4);
+    }
+    pub fn scroll_right(&mut self) {
+        self.scroll_offset = self.scroll_offset.saturating_add(4);
+    }
 
     pub fn zoom_in(&mut self) {
         self.zoom_factor = (self.zoom_factor - 0.25).max(0.5);
@@ -220,7 +238,9 @@ pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
 
     pub fn random_theme(&mut self) {
         let len = self.visible_themes().len();
-        if len == 0 { return; }
+        if len == 0 {
+            return;
+        }
         self.selected = rand::rng().random_range(0..len);
         self.scroll_offset = 0;
         self.preview_timer = PREVIEW_DEBOUNCE;
@@ -256,7 +276,8 @@ pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
     }
 
     pub fn visible_themes(&self) -> Vec<&Theme> {
-        self.filtered.iter()
+        self.filtered
+            .iter()
             .filter_map(|&i| self.themes.get(i))
             .filter(|t| {
                 if self.show_favs {
@@ -275,20 +296,49 @@ pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
         ((base_width as f32) * self.zoom_factor) as u16
     }
 
+    pub async fn edit_theme(&mut self) {
+        let Some(theme) = self.selected_theme().cloned() else {
+            return;
+        };
+
+        let path = self.cache_dir.join(&theme.filename);
+        if !path.exists() {
+            // Can't edit what isn't downloaded
+            return;
+        }
+
+        let mut stdout = std::io::stdout();
+        let _ = crossterm::terminal::disable_raw_mode();
+        let _ = stdout.execute(crossterm::terminal::LeaveAlternateScreen);
+
+        let editor = std::env::var("EDITOR").unwrap_or_else(|_| "nano".to_string());
+
+        if let Err(e) = std::process::Command::new(&editor).arg(&path).status() {
+            eprintln!("Failed to run editor ({}): {}", editor, e);
+        }
+
+        let _ = crossterm::terminal::enable_raw_mode();
+        let _ = stdout.execute(crossterm::terminal::EnterAlternateScreen);
+
+        self.trigger_preview().await;
+    }
+
     pub async fn trigger_preview(&mut self) {
-        let Some(theme) = self.selected_theme().cloned() else { return };
+        let Some(theme) = self.selected_theme().cloned() else {
+            return;
+        };
         self.config.push_recent(&theme.name);
         self.save_config();
         self.preview_loading = true;
-        self.preview_output  = String::new();
-        self.cached_preview  = None;
+        self.preview_output = String::new();
+        self.cached_preview = None;
 
         let dest = self.cache_dir.join(&theme.filename);
         if !dest.exists() {
             match crate::themes::download_theme(&theme, &self.cache_dir).await {
-                Ok(_)  => {}
+                Ok(_) => {}
                 Err(e) => {
-                    self.preview_output  = format!("  download error: {e}");
+                    self.preview_output = format!("  download error: {e}");
                     self.preview_loading = false;
                     return;
                 }
@@ -300,7 +350,9 @@ pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
     }
 
     pub async fn trigger_immersive_preview(&mut self) {
-        let Some(theme) = self.selected_theme().cloned() else { return };
+        let Some(theme) = self.selected_theme().cloned() else {
+            return;
+        };
         let dest = self.cache_dir.join(&theme.filename);
         if !dest.exists() {
             let _ = crate::themes::download_theme(&theme, &self.cache_dir).await;
@@ -308,18 +360,20 @@ pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
         self.imm_history.clear();
         self.imm_input.clear();
         // render at true full terminal width
-        self.worker.request(dest, self.terminal_width.saturating_sub(2)).await;
+        self.worker
+            .request(dest, self.terminal_width.saturating_sub(2))
+            .await;
     }
 
     pub async fn poll_preview(&mut self) {
         if let Some(out) = self.worker.take_output().await {
-            self.preview_output  = out.clone();
-            self.cached_preview  = Some(ansi_to_text(&out));
+            self.preview_output = out.clone();
+            self.cached_preview = Some(ansi_to_text(&out));
             self.preview_loading = false;
 
             if self.mode == Mode::Immersive && self.imm_history.is_empty() {
                 self.imm_history.push(ImmLine {
-                    kind:    ImmKind::Prompt,
+                    kind: ImmKind::Prompt,
                     content: out,
                 });
             }
@@ -329,9 +383,9 @@ pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
     // called once background fetch completes
     pub fn init_themes(&mut self, list: Vec<Theme>) {
         let theme_names: Vec<String> = list.iter().map(|t| t.name.clone()).collect();
-        self.fuzzy   = crate::search::FuzzySearch::new(theme_names);
+        self.fuzzy = crate::search::FuzzySearch::new(theme_names);
         self.filtered = (0..list.len()).collect();
-        self.themes  = list;
+        self.themes = list;
         self.loading = false;
 
         // restore cursor to last applied
@@ -344,10 +398,12 @@ pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
 
     // r key — re-fetch from GitHub
     pub fn start_refresh(&mut self) {
-        if self.refreshing { return; }
-        self.refreshing     = true;
+        if self.refreshing {
+            return;
+        }
+        self.refreshing = true;
         self.preview_output.clear();
-        self.cached_preview  = None;
+        self.cached_preview = None;
 
         let (tx, rx) = tokio::sync::mpsc::channel::<Vec<Theme>>(1);
         self.refresh_rx = Some(rx);
@@ -360,20 +416,27 @@ pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
     }
 
     pub async fn poll_refresh(&mut self) {
-        if !self.refreshing { return; }
+        if !self.refreshing {
+            return;
+        }
         let done = if let Some(rx) = &mut self.refresh_rx {
             match rx.try_recv() {
-                Ok(list) => { self.init_themes(list); Some(true) }
-                Err(_)   => None,
+                Ok(list) => {
+                    self.init_themes(list);
+                    Some(true)
+                }
+                Err(_) => None,
             }
-        } else { None };
+        } else {
+            None
+        };
 
         if done.is_some() {
             self.refreshing = false;
             self.refresh_rx = None;
-            self.message        = format!("✓ refreshed — {} themes loaded", self.themes.len());
+            self.message = format!("✓ refreshed — {} themes loaded", self.themes.len());
             self.message_is_err = false;
-            self.mode           = Mode::Message;
+            self.mode = Mode::Message;
         }
     }
 
@@ -389,7 +452,7 @@ pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
         if input.is_empty() {
             // blank enter — just add a new prompt
             self.imm_history.push(ImmLine {
-                kind:    ImmKind::Prompt,
+                kind: ImmKind::Prompt,
                 content: self.preview_output.clone(),
             });
             return;
@@ -401,7 +464,7 @@ pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
 
         // 1. record the typed command on the last prompt line
         self.imm_history.push(ImmLine {
-            kind:    ImmKind::Input,
+            kind: ImmKind::Input,
             content: input.clone(),
         });
 
@@ -414,7 +477,7 @@ pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
         } else {
             for line in output_lines {
                 self.imm_history.push(ImmLine {
-                    kind:    ImmKind::Output,
+                    kind: ImmKind::Output,
                     content: line,
                 });
             }
@@ -422,50 +485,59 @@ pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
 
         // 3. new prompt ready for next command
         self.imm_history.push(ImmLine {
-            kind:    ImmKind::Prompt,
+            kind: ImmKind::Prompt,
             content: self.preview_output.clone(),
         });
     }
 
-    pub fn imm_backspace(&mut self) { self.imm_input.pop(); }
-    pub fn imm_push(&mut self, c: char) { self.imm_input.push(c); }
+    pub fn imm_backspace(&mut self) {
+        self.imm_input.pop();
+    }
+    pub fn imm_push(&mut self, c: char) {
+        self.imm_input.push(c);
+    }
 
     pub fn load_shell_info(&mut self) {
-    match crate::shell::ShellInfo::load() {
-        Ok(info) => self.shell_info = Some(info),
-        Err(e)   => {
-            self.message       = format!("shell detection failed: {e}");
-            self.message_is_err = true;
-            self.mode          = Mode::Message;
+        match crate::shell::ShellInfo::load() {
+            Ok(info) => self.shell_info = Some(info),
+            Err(e) => {
+                self.message = format!("shell detection failed: {e}");
+                self.message_is_err = true;
+                self.mode = Mode::Message;
+            }
         }
     }
-}
 
     pub fn do_apply(&mut self) {
         let Some(info) = &self.shell_info else { return };
-        let Some(theme) = self.selected_theme() else { return };
-        let theme_path  = self.cache_dir.join(&theme.filename);
-        let theme_name  = theme.name.clone();        // clone before borrow ends
-        let rc_path     = info.rc_path.display().to_string(); // clone before borrow ends
+        let Some(theme) = self.selected_theme() else {
+            return;
+        };
+        let theme_path = self.cache_dir.join(&theme.filename);
+        let theme_name = theme.name.clone(); // clone before borrow ends
+        let rc_path = info.rc_path.display().to_string(); // clone before borrow ends
 
-        match crate::shell::apply_theme(
-            self.shell_info.as_ref().unwrap(),
-            &theme_path,
-        ) {
+        if self.dry_run {
+            self.message = format!("DRY RUN: Would have modified {}", rc_path);
+            self.message_is_err = false;
+            self.mode = Mode::Message;
+            return;
+        }
+
+        match crate::shell::apply_theme(self.shell_info.as_ref().unwrap(), &theme_path) {
             Ok(_) => {
-                self.last_applied   = Some(theme_name.clone());
+                self.last_applied = Some(theme_name.clone());
                 self.config.last_applied = Some(theme_name.clone());
                 self.save_config();
-                self.message        = format!(
+                self.message = format!(
                     "✓ applied {}  →  {}\n\nopen a new terminal to see it.\npress u to undo.",
-                    theme_name,
-                    rc_path,
+                    theme_name, rc_path,
                 );
                 self.message_is_err = false;
                 self.load_shell_info();
             }
             Err(e) => {
-                self.message        = format!("✗ apply failed: {e}");
+                self.message = format!("✗ apply failed: {e}");
                 self.message_is_err = true;
             }
         }
@@ -474,17 +546,25 @@ pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
 
     pub fn do_undo(&mut self) {
         let Some(info) = &self.shell_info else { return };
+
+        if self.dry_run {
+            self.message = format!(
+                "DRY RUN: Would have restored backup to {}",
+                info.rc_path.display()
+            );
+            self.message_is_err = false;
+            self.mode = Mode::Message;
+            return;
+        }
+
         match crate::shell::undo(info) {
             Ok(_) => {
-                self.message        = format!(
-                    "✓ restored backup\n→ {}",
-                    info.backup_path.display()
-                );
+                self.message = format!("✓ restored backup\n→ {}", info.backup_path.display());
                 self.message_is_err = false;
                 self.load_shell_info();
             }
             Err(e) => {
-                self.message        = format!("✗ undo failed: {e}");
+                self.message = format!("✗ undo failed: {e}");
                 self.message_is_err = true;
             }
         }
@@ -493,6 +573,17 @@ pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
 
     pub fn do_soft_revert(&mut self) {
         let Some(info) = &self.shell_info else { return };
+
+        if self.dry_run {
+            self.message = format!(
+                "DRY RUN: Would have removed posh-tui block from {}",
+                info.rc_path.display()
+            );
+            self.message_is_err = false;
+            self.mode = Mode::Message;
+            return;
+        }
+
         match crate::shell::soft_revert(info) {
             Ok(_) => {
                 self.message        = "✓ removed posh-tui block from rc file\n\nopen a new terminal to see default prompt.".into();
@@ -500,7 +591,7 @@ pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
                 self.load_shell_info();
             }
             Err(e) => {
-                self.message        = format!("✗ revert failed: {e}");
+                self.message = format!("✗ revert failed: {e}");
                 self.message_is_err = true;
             }
         }
@@ -509,6 +600,17 @@ pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
 
     pub fn do_hard_revert(&mut self) {
         let Some(info) = &self.shell_info else { return };
+
+        if self.dry_run {
+            self.message = format!(
+                "DRY RUN: Would have removed oh-my-posh lines from {}",
+                info.rc_path.display()
+            );
+            self.message_is_err = false;
+            self.mode = Mode::Message;
+            return;
+        }
+
         match crate::shell::hard_revert(info) {
             Ok(n) => {
                 self.message        = format!(
@@ -519,7 +621,7 @@ pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
                 self.load_shell_info();
             }
             Err(e) => {
-                self.message        = format!("✗ hard revert failed: {e}");
+                self.message = format!("✗ hard revert failed: {e}");
                 self.message_is_err = true;
             }
         }
@@ -534,13 +636,12 @@ pub fn new(themes: Vec<Theme>, cache_dir: PathBuf) -> Self {
                 self.mode = Mode::HardRevert;
             }
             Err(e) => {
-                self.message        = format!("✗ {e}");
+                self.message = format!("✗ {e}");
                 self.message_is_err = true;
-                self.mode           = Mode::Message;
+                self.mode = Mode::Message;
             }
         }
     }
-
 }
 
 fn fake_command_output(cmd: &str) -> Vec<String> {
@@ -626,28 +727,28 @@ fn fake_command_output(cmd: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
     use crate::themes::Theme;
+    use std::path::PathBuf;
 
     fn dummy_themes() -> Vec<Theme> {
         vec![
             Theme {
-                name:     "catppuccin".into(),
+                name: "catppuccin".into(),
                 filename: "catppuccin.omp.json".into(),
-                raw_url:  "http://example.com/1".into(),
-                local:    None,
+                raw_url: "http://example.com/1".into(),
+                local: None,
             },
             Theme {
-                name:     "tokyo-night".into(),
+                name: "tokyo-night".into(),
                 filename: "tokyo-night.omp.json".into(),
-                raw_url:  "http://example.com/2".into(),
-                local:    None,
+                raw_url: "http://example.com/2".into(),
+                local: None,
             },
             Theme {
-                name:     "agnoster".into(),
+                name: "agnoster".into(),
                 filename: "agnoster.omp.json".into(),
-                raw_url:  "http://example.com/3".into(),
-                local:    None,
+                raw_url: "http://example.com/3".into(),
+                local: None,
             },
         ]
     }
@@ -657,15 +758,27 @@ mod tests {
     #[tokio::test]
     async fn test_zoom_in_bounded() {
         let mut app = App::new(dummy_themes(), PathBuf::from("/tmp"));
-        for _ in 0..20 { app.zoom_in(); }
-        assert!(app.zoom_factor >= 0.5, "zoom_factor should not go below 0.5, got {}", app.zoom_factor);
+        for _ in 0..20 {
+            app.zoom_in();
+        }
+        assert!(
+            app.zoom_factor >= 0.5,
+            "zoom_factor should not go below 0.5, got {}",
+            app.zoom_factor
+        );
     }
 
     #[tokio::test]
     async fn test_zoom_out_bounded() {
         let mut app = App::new(dummy_themes(), PathBuf::from("/tmp"));
-        for _ in 0..20 { app.zoom_out(); }
-        assert!(app.zoom_factor <= 3.0, "zoom_factor should not exceed 3.0, got {}", app.zoom_factor);
+        for _ in 0..20 {
+            app.zoom_out();
+        }
+        assert!(
+            app.zoom_factor <= 3.0,
+            "zoom_factor should not exceed 3.0, got {}",
+            app.zoom_factor
+        );
     }
 
     #[tokio::test]
@@ -685,11 +798,17 @@ mod tests {
 
         // toggle on — catppuccin should appear in favourites
         app.toggle_favourite();
-        assert!(app.favourites.contains("catppuccin"), "expected catppuccin in favourites after first toggle");
+        assert!(
+            app.favourites.contains("catppuccin"),
+            "expected catppuccin in favourites after first toggle"
+        );
 
         // toggle off — catppuccin should be removed
         app.toggle_favourite();
-        assert!(!app.favourites.contains("catppuccin"), "expected catppuccin removed from favourites after second toggle");
+        assert!(
+            !app.favourites.contains("catppuccin"),
+            "expected catppuccin removed from favourites after second toggle"
+        );
     }
 
     #[tokio::test]

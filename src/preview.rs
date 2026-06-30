@@ -1,17 +1,17 @@
+use crate::error::Result;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
-use crate::error::Result;
 
 #[derive(Debug)]
 pub enum PreviewMsg {
-    Load(PathBuf, u16),  // path + terminal width
+    Load(PathBuf, u16), // path + terminal width
     #[allow(dead_code)]
     Quit,
 }
 
 pub struct PreviewWorker {
-    pub tx:     mpsc::Sender<PreviewMsg>,
+    pub tx: mpsc::Sender<PreviewMsg>,
     pub output: Arc<Mutex<Option<String>>>,
 }
 
@@ -29,7 +29,7 @@ impl PreviewWorker {
                         let result = render_preview(&path, width).await;
                         let mut lock = output_clone.lock().await;
                         *lock = Some(match result {
-                            Ok(s)  => s,
+                            Ok(s) => s,
                             Err(e) => format!("  preview error: {e}"),
                         });
                     }
@@ -57,10 +57,11 @@ async fn render_preview(path: &PathBuf, width: u16) -> Result<String> {
     let output = tokio::process::Command::new("oh-my-posh")
         .args(["print", "primary", "--config"])
         .arg(path)
-        .arg("--shell").arg("bash")
+        .arg("--shell")
+        .arg("bash")
         .env("TERM", "xterm-256color")
         .env("COLORTERM", "truecolor")
-        .env("COLUMNS", &cols)      // tells omp exactly how wide to render
+        .env("COLUMNS", &cols) // tells omp exactly how wide to render
         .env("LINES", "10")
         .output()
         .await?;
@@ -71,9 +72,7 @@ async fn render_preview(path: &PathBuf, width: u16) -> Result<String> {
         return Ok("  (empty output — try another theme)".to_string());
     }
 
-    let cleaned = raw
-        .replace("\\[", "")
-        .replace("\\]", "");
+    let cleaned = raw.replace("\\[", "").replace("\\]", "");
 
     Ok(cleaned)
 }

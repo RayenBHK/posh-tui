@@ -38,12 +38,12 @@ Oh My Posh ships with 120+ themes but provides no interactive browser. Users mus
 | Metric | Value |
 |--------|-------|
 | Language | Rust (edition 2021) |
-| Version | 0.4.0 |
-| Lines of code | ~2,500 (9 source files) |
-| Binary size | 4.2 MB (release, stripped) |
-| Dependencies | 13 crates |
-| Test count | 32 tests (including UI snapshots) |
-| Platforms | Linux (x64 + ARM64), macOS (x64 + ARM), WSL, Windows |
+| Version | 0.4.2 |
+| Lines of code | ~3,260 (35 source files) |
+| Binary size | ~3 MB (release, stripped, LTO) |
+| Dependencies | 14 crates |
+| Test count | 32 tests (including UI snapshot) |
+| Platforms | Linux (x64 + ARM64), macOS (x64 + ARM64), WSL, Windows |
 
 ---
 
@@ -67,7 +67,7 @@ Oh My Posh ships with 120+ themes but provides no interactive browser. Users mus
 | **Horizontal scroll + zoom** | Scroll preview left/right, zoom in/out to adjust column width |
 | **Config persistence** | Favourites, last applied, zoom factor, and recent themes persisted to TOML |
 | **Offline fallback** | Caches theme list JSON; loads from cache when GitHub API is unavailable. Retries up to 3× with backoff before falling back |
-| **Cross-platform CI** | GitHub Actions builds for Linux (x64 + ARM64), macOS (x64 + ARM), and Windows |
+| **Cross-platform CI** | GitHub Actions builds for Linux (x64 + ARM64), macOS (x64 + ARM64), and Windows |
 
 ### Immersive mode commands
 
@@ -99,32 +99,36 @@ The project follows an **Elm-like architecture** (Model-Update-View):
 
 ```mermaid
 graph LR
-    subgraph Core ["🔁 Core Loop  —  main.rs"]
+    subgraph Entry ["🚀 Entry — main.rs"]
         EL["Event Loop\n30 fps poll"]
     end
 
-    subgraph State ["📦 State  —  app.rs"]
-        APP["App\nAll runtime state"]
+    subgraph State ["📦 Model — app/"]
+        APP["App struct\ncomposes sub-states"]
     end
 
-    subgraph Render ["🖥️ Render  —  ui.rs"]
-        UI["UI\nDeclarative draw"]
+    subgraph Render ["🖥️ View — ui/"]
+        UI["draw()\ncomponents + screens + overlays"]
     end
 
-    subgraph IO ["🔌 I/O & Services"]
+    subgraph Input ["⌨️ Update — input/"]
+        IN["Key/mouse dispatch\nper-mode handlers"]
+    end
+
+    subgraph Domain ["🔌 Domain — core/"]
         TH["themes.rs\nGitHub API + cache"]
-        PV["preview.rs\nAsync oh-my-posh worker"]
         SH["shell.rs\nRC-file patching"]
         CF["config.rs\nTOML persistence"]
+        ERR["error.rs\nPoshError (thiserror)"]
+    end
+
+    subgraph Infra ["⚙️ Infrastructure"]
+        PV["preview.rs\nAsync oh-my-posh worker"]
         SR["search.rs\nNucleo fuzzy search"]
     end
 
-    subgraph Input ["⌨️ Input  —  crossterm"]
-        CT["Keyboard / Mouse\nEvents"]
-    end
-
-    CT -->|"key events"| EL
-    EL -->|"dispatch input"| APP
+    EL -->|"dispatch"| IN
+    IN -->|"mutate"| APP
     APP -->|"state snapshot"| UI
     APP -->|"fetch / cache"| TH
     APP -->|"preview request"| PV
@@ -141,11 +145,11 @@ graph LR
 sequenceDiagram
     autonumber
     participant M  as main.rs
-    participant A  as app.rs
-    participant T  as themes.rs
+    participant A  as app/
+    participant T  as core/themes.rs
     participant PW as preview.rs
-    participant SH as shell.rs
-    participant UI as ui.rs
+    participant SH as core/shell.rs
+    participant UI as ui/
     participant GH as GitHub API
     participant OMP as oh-my-posh CLI
 
@@ -161,7 +165,7 @@ sequenceDiagram
 
     rect rgb(30, 50, 40)
         note over M,UI: 🎨 Navigation & Preview (165 ms debounce)
-        M->>A: handle_normal() → move_up / move_down
+        M->>A: input::handle_normal() → move_up / move_down
         A->>A: set preview_timer (5 ticks)
         A->>A: step_preview_timer() fires → trigger_preview()
         A->>T: download_theme() if not in local cache
@@ -175,7 +179,7 @@ sequenceDiagram
 
     rect rgb(60, 30, 30)
         note over M,SH: ✅ Apply Theme  (Enter → Confirm → Enter)
-        M->>A: handle_confirm() → do_apply()
+        M->>A: input::handle_overlay() → do_apply()
         A->>SH: apply_theme(omp_path, theme_path, shell)
         SH->>SH: backup rc file → .posh-tui.bak
         SH->>SH: write managed block (# posh-tui:start … end)
@@ -197,15 +201,16 @@ sequenceDiagram
 
 | Module | Lines | Role |
 |--------|------:|------|
-| `ui.rs` | 702 | Rendering: layout, list, preview, immersive, ANSI parsing, modal overlays |
-| `app.rs` | 622 | Central state model, navigation, search, preview, shell operations, immersive |
-| `shell.rs` | 418 | Shell detection, rc-file patching (apply/undo/soft-revert/hard-revert), backup management |
-| `main.rs` | 246 | Entry point, terminal setup/teardown, event loop, input dispatch |
-| `themes.rs` | 97 | GitHub API theme list fetch, theme download, offline cache |
-| `config.rs` | 82 | TOML-based config persistence (favourites, zoom, last_applied, recent) |
-| `preview.rs` | 78 | Async worker that spawns `oh-my-posh` CLI and returns stdout |
-| `search.rs` | 57 | Fuzzy search wrapper around nucleo matcher |
-| `error.rs` | 36 | `PoshError` enum with `From` conversions |
+| `ui/` | 1,003 | Rendering: layout, list, preview, immersive, ANSI parsing, modal overlays |
+| `app/` | 894 | Central state model with sub-states, navigation, search, preview, shell operations |
+| `core/shell.rs` | 465 | Shell detection, rc-file patching, backup management |
+| `main.rs` | 168 | Entry point, terminal setup/teardown, event loop, CLI args |
+| `core/themes.rs` | 191 | GitHub API theme list fetch, theme download, offline cache |
+| `core/config.rs` | 135 | TOML-based config persistence (favourites, zoom, last_applied, recent) |
+| `input/` | 185 | Key/mouse event dispatch, per-mode handlers (normal, search, immersive, overlay) |
+| `preview.rs` | 83 | Async worker that spawns `oh-my-posh` CLI and returns stdout |
+| `search.rs` | 97 | Fuzzy search wrapper around nucleo matcher |
+| `core/error.rs` | 28 | `PoshError` enum via `thiserror` derive |
 
 ---
 
@@ -217,64 +222,81 @@ sequenceDiagram
 - Terminal initialization (raw mode, alternate screen, mouse capture)
 - Background theme fetching with network/cached fallback
 - Event loop running at ~30fps (33ms poll interval)
-- Input dispatch per mode (Normal, Search, Confirm, Immersive, Help, SoftRevert, HardRevert, Message)
+- CLI argument parsing (`--dry-run`, `--generate-completions`)
+- Delegates key/mouse events to `input/` module
 
-**Key functions:**
+**Key items:**
 - `main()` — Bootstraps cache directory, terminal, and background fetch task
-- `run_app()` — Core loop: poll events → tick → draw → handle input
-- `handle_normal()` — 20+ keybindings for navigation, preview, search, favourites, etc.
-- `handle_search()` — Character input, backspace, cancel
-- `handle_confirm()` — Enter to apply, Esc to cancel
-- `handle_immersive()` — Typing, Enter for command, Ctrl+A for apply, Esc to exit
+- `run_app()` — Core loop: poll events → tick → draw → handle input → drain background channels
+- `AppEvent` — Enum for background task communication (`ThemesLoaded`, `ThemeLoadError`)
+- `Cli` — Clap struct for CLI args
 
-### 4.2 `app.rs` — State model & behavior
+### 4.2 `app/` — State model & behavior
 
 **Responsibilities:**
-- Holds all runtime state (~25 public fields)
+- Holds all runtime state via composed sub-state structs
 - Navigation (up/down/top/bottom/page), search, preview orchestration
 - Shell operations (apply, undo, soft revert, hard revert)
 - Immersive mode command simulation
 - Config persistence
-- ANSI preview caching (parsed once per update, not per frame)
 
-**Key types:**
+**Sub-states:**
+
+| Sub-state | File | Fields | Methods |
+|-----------|------|--------|---------|
+| `ThemeState` | `theme_state.rs` | `themes`, `filtered`, `selected`, `favourites`, `show_favs`, `show_recent`, `last_applied` | `move_*`, `page_*`, `toggle_favourite`, `random_theme`, `init_themes`, `selected_theme`, `visible_themes` |
+| `PreviewState` | `preview_state.rs` | `preview_output`, `cached_preview`, `preview_loading`, `worker`, `preview_width`, `terminal_width`, `scroll_offset`, `zoom_factor`, `preview_timer` | `scroll_*`, `zoom_*`, `step_preview_timer`, `effective_columns`, `trigger_preview`, `trigger_immersive_preview`, `poll_preview`, `edit_theme` |
+| `SearchState` | `search_state.rs` | `search_query`, `fuzzy` | `apply_search`, `clear_search` |
+| `ImmersiveState` | `immersive_state.rs` | `imm_input`, `imm_history`, `imm_cursor_tick` | `imm_submit`, `imm_backspace`, `imm_push` |
+
+**Key types (in `mod.rs`):**
 - `Mode` — Enum: Normal, Search, Confirm, Help, Immersive, SoftRevert, HardRevert, Message
-- `App` — Central state struct with all runtime fields
+- `App` — Central state struct composing all sub-states + app-level fields
 - `ImmLine` / `ImmKind` — Immersive history line representation (`Prompt`, `Input`, `Output`)
 
-**Notable fields:**
-- `cached_preview: Option<Text<'static>>` — Parsed ANSI preview text, populated once in `poll_preview()` and read by `ui.rs` each frame instead of re-parsing
-
-**Key methods:**
+**Orchestration methods (in `mod.rs`):**
 - `new()` — Initializes state, restores config, spawns preview worker
-- `selected_theme()` — Maps selection to Theme via visible list (favourites-aware)
-- `visible_themes()` — Filters by favourites or recent view
-- `trigger_preview()` — Downloads theme if needed, sends to preview worker, tracks recent
-- `poll_preview()` — Collects worker output, parses ANSI once into `cached_preview`
-- `step_preview_timer()` — Decrements debounce timer, returns true when ready to trigger
-- `random_theme()` — Picks random index from visible themes
-- `do_apply()` / `do_undo()` / `do_soft_revert()` / `do_hard_revert()` — Shell operations
+- `save_config()` — Syncs sub-state fields back to `Config` and persists
+- `tick()` — Advances immersive cursor blink counter
+- `start_refresh()` / `poll_refresh()` — GitHub re-fetch via background channel
+- `load_shell_info()` — Detects shell and loads `ShellInfo`
+- `do_apply()` / `do_undo()` / `do_soft_revert()` / `do_hard_revert()` / `prepare_hard_revert()` — Shell operations
 
-### 4.3 `ui.rs` — Rendering
+### 4.3 `input/` — Event handling
+
+**Responsibilities:**
+- Dispatches keyboard and mouse events to per-mode handlers
+- Splits keybinding logic by application mode for extensibility
+
+**Files:**
+- `mod.rs` — `handle_key_event(app, key)` dispatcher + `handle_mouse(app, mouse)` (scroll only)
+- `normal.rs` — `handle_normal()` — 20+ keybindings for `Mode::Normal`
+- `search.rs` — `handle_search()` — Character input, backspace, cancel for `Mode::Search`
+- `immersive.rs` — `handle_immersive()` — Typing, Enter, Ctrl+A, Esc for `Mode::Immersive`
+- `overlay.rs` — `handle_overlay()` — Help, Confirm, SoftRevert, HardRevert, Message modes
+
+> **Note:** `Event::Resize` stays in `main.rs::run_app` (needs `&mut Terminal` for `autoresize()`).
+
+### 4.4 `ui/` — Rendering
 
 **Responsibilities:**
 - Declarative rendering of all UI elements
-- ANSI escape sequence parsing via `ansi-to-tui` crate (parsing done in `app.rs`; `ui.rs` reads cached `Text<'static>`)
+- ANSI escape sequence parsing via `ansi-to-tui` crate (parsing done in `app/`; `ui/` reads cached `Text<'static>`)
 - Horizontal scroll with span-aware slicing (preserves styling)
 - Modal overlays (help, confirm, soft revert, hard revert, message)
 
-**Key functions:**
-- `draw()` — Top-level dispatcher; switches to immersive if active
-- `draw_search()` — Search bar with mode-driven styling and title
-- `draw_main()` — List + preview split layout
-- `draw_list()` — Theme list with star/applied indicators
-- `draw_preview()` — Preview pane; reads `app.cached_preview` (no re-parse per frame)
-- `draw_immersive()` — Full-screen pseudo-shell with history + input line
-- `ansi_to_text()` — `pub(crate)` wrapper around `ansi-to-tui::IntoText`; called from `app.rs`
-- `draw_help()` / `draw_confirm()` / `draw_soft_revert()` / `draw_hard_revert()` / `draw_message()` — Modal dialogs
-- `centered_rect()` — Helper for centered popup positioning
+**Structure:**
+- `mod.rs` — `pub fn draw()` dispatcher + `pub use ansi_to_text` re-export + insta snapshot test
+- `components/` — `theme_list.rs`, `preview_pane.rs`, `search_bar.rs`, `status_bar.rs`
+- `screens/` — `main_screen.rs` (two-pane layout), `immersive_screen.rs` (full-screen terminal)
+- `overlays/` — `help.rs`, `confirm.rs`, `revert.rs` (soft + hard), `message.rs`
+- `utilities/` — `ansi.rs` (`ansi_to_text`), `layout.rs` (`centered_rect`)
 
-### 4.4 `shell.rs` — Shell integration
+**Key functions:**
+- `draw()` — Top-level dispatcher; switches to immersive if active, otherwise renders search bar + main screen + status bar + optional overlay
+- `ansi_to_text()` — Wrapper around `ansi-to-tui::IntoText`; called from `app/preview_state.rs`
+
+### 4.5 `core/shell.rs` — Shell integration
 
 **Responsibilities:**
 - Shell detection via `$SHELL` environment variable
@@ -284,22 +306,16 @@ sequenceDiagram
 
 **Key types:**
 - `Shell` — Enum: Bash, Zsh, Fish, Unknown
-- `ShellInfo` — Current shell state: path, has_managed_block, has_any_omp, backup_path
+- `ShellInfo` — Current shell state: path, has_managed_block, backup_path
 
 **Key functions:**
-- `apply_theme(&Path, ...)` — Creates backup, writes managed block (appends or replaces)
+- `apply_theme()` — Creates backup, writes managed block (appends or replaces)
 - `soft_revert()` — Removes only the posh-tui managed block
 - `hard_revert()` — Removes all lines containing "oh-my-posh"
 - `undo()` — Restores from backup file
-- `replace_managed_block()` — Idempotent replacement of managed block
-- `remove_managed_block()` — Extracts managed block from rc file
-- `remove_all_omp_lines()` — Removes all oh-my-posh lines
-- `which_omp()` — Resolves oh-my-posh binary path
-- `backup_path_for(&Path)` — Generates `.posh-tui.bak` path for a given rc file
+- `which_omp()` — Resolves oh-my-posh binary path via `which` command
 
-> **Note:** All file-path parameters use `&Path` (not `&PathBuf`) for idiomatic Rust API design.
-
-### 4.5 `themes.rs` — Theme sourcing
+### 4.6 `core/themes.rs` — Theme sourcing
 
 **Responsibilities:**
 - Fetch theme list from GitHub Contents API with automatic retry
@@ -307,31 +323,11 @@ sequenceDiagram
 - Save/load theme list cache for offline use
 
 **Key functions:**
-- `fetch_theme_list()` — Retries up to 3× (1 s / 2 s / 4 s backoff), then returns last error. Inner work delegated to `try_fetch_theme_list()`
-- `try_fetch_theme_list()` — Single GET to GitHub API, filters `.omp.json` files, returns `Vec<Theme>`
-- `download_theme(&Path, ...)` — Fetch raw theme file, cache to disk
-- `save_theme_list_cache(&Path, ...)` — Serialize theme list to `themes_cache.json`
-- `load_cached_theme_list(&Path)` — Load cached theme list from disk
+- `fetch_theme_list()` — Retries up to 3× (1s / 2s / 4s backoff), then returns last error
+- `download_theme()` — Fetch raw theme file, cache to disk
+- `save_theme_list_cache()` / `load_cached_theme_list()` — Offline cache support
 
-> **Note:** All cache-directory parameters use `&Path` (not `&PathBuf`).
-
-### 4.6 `preview.rs` — Preview pipeline
-
-**Responsibilities:**
-- Run `oh-my-posh print primary` asynchronously
-- Return stdout as styled preview output
-
-**Key types:**
-- `PreviewWorker` — Tokio task + mpsc channel + shared Mutex for output
-- `PreviewMsg` — Load(path, width) or Quit
-
-**Key functions:**
-- `spawn()` — Creates background worker task
-- `request()` — Sends preview request to worker
-- `take_output()` — Polls for completed preview output
-- `render_preview()` — Spawns oh-my-posh process with COLUMNS/LINES env vars
-
-### 4.7 `config.rs` — Configuration
+### 4.7 `core/config.rs` — Configuration
 
 **Responsibilities:**
 - Persist user preferences to TOML
@@ -343,35 +339,36 @@ sequenceDiagram
 - `zoom_factor: f32` — Preview zoom level (0.5–3.0)
 - `recent: Vec<String>` — Last 10 previewed theme names
 
-**Key functions:**
-- `load()` — Load from disk or fall back to defaults
-- `save()` — Write TOML to `~/.config/posh-tui/config.toml`
-- `push_recent()` — Add theme to front of recent list, deduplicate, truncate to 10
+### 4.8 `core/error.rs` — Error types
 
-### 4.8 `search.rs` — Fuzzy search
+**Responsibilities:**
+- Unified error type via `thiserror` derive
+
+**Variants:**
+- `Io` — `#[from] std::io::Error`
+- `Http` — `#[from] reqwest::Error`
+- `Json` — `#[from] serde_json::Error`
+- `Toml` — `#[from] toml::de::Error`
+- `TomlSer` — `#[from] toml::ser::Error`
+- `Preview(String)` — Preview-specific errors
+- `Shell(String)` — Shell operation errors
+- `Config(String)` — Configuration errors
+
+### 4.9 `preview.rs` — Preview pipeline
+
+**Responsibilities:**
+- Run `oh-my-posh print primary` asynchronously with 5-second timeout
+- Return stdout as styled preview output
+
+**Key types:**
+- `PreviewWorker` — Tokio task + mpsc channel + shared Mutex for output
+- `PreviewMsg` — `Load(path, width)` or `Quit`
+
+### 4.10 `search.rs` — Fuzzy search
 
 **Responsibilities:**
 - Wrap nucleo matcher for fuzzy search
 - Case-insensitive with smart normalization
-
-**Key functions:**
-- `new()` — Initialize nucleo with theme names
-- `query()` — Reparse pattern, tick matcher, return sorted results
-
-### 4.9 `error.rs` — Error types
-
-**Responsibilities:**
-- Unified error type with Display and From conversions
-
-**Variants:**
-- `Io` — std::io::Error
-- `Http` — reqwest::Error
-- `Json` — serde_json::Error
-- `Toml` — toml::de::Error
-- `TomlSer` — toml::ser::Error
-- `Preview(String)` — Preview-specific errors
-- `Shell(String)` — Shell operation errors
-- `Config(String)` — Configuration errors
 
 ---
 
@@ -531,21 +528,38 @@ The app opens instantly. Themes load from GitHub in the background with a spinne
 ```
 posh-tui/
 ├── src/
-│   ├── main.rs          # Entry point, event loop, input dispatch
-│   ├── app.rs           # State model, navigation, search, preview, shell ops
-│   ├── ui.rs            # Rendering, ANSI parsing, layouts, modals
-│   ├── shell.rs         # Shell detection, rc-file patching, backup management
-│   ├── themes.rs        # GitHub API fetch, download, offline cache
-│   ├── config.rs        # TOML config persistence
-│   ├── preview.rs       # Async oh-my-posh worker
-│   ├── search.rs        # Nucleo fuzzy search
-│   └── error.rs         # Error types
+│   ├── main.rs              # Entry point, event loop, CLI
+│   ├── preview.rs           # Async oh-my-posh worker
+│   ├── search.rs            # Nucleo fuzzy search
+│   ├── app/                 # State model (sub-state composition)
+│   │   ├── mod.rs           #   App struct, Mode, ImmLine, ImmKind, orchestration
+│   │   ├── theme_state.rs   #   Theme list + navigation
+│   │   ├── preview_state.rs #   Preview + zoom + scroll
+│   │   ├── search_state.rs  #   Search query + fuzzy
+│   │   └── immersive_state.rs #  Immersive mode + fake shell
+│   ├── core/                # Domain logic
+│   │   ├── mod.rs           #   Re-exports
+│   │   ├── config.rs        #   TOML config persistence
+│   │   ├── error.rs         #   PoshError (thiserror)
+│   │   ├── shell.rs         #   Shell detection, rc-file patching
+│   │   └── themes.rs        #   GitHub API, cache, download
+│   ├── input/               # Event handling
+│   │   ├── mod.rs           #   Key/mouse dispatcher
+│   │   ├── normal.rs        #   Normal mode keybindings
+│   │   ├── search.rs        #   Search mode keybindings
+│   │   ├── immersive.rs     #   Immersive mode keybindings
+│   │   └── overlay.rs       #   Overlay mode keybindings
+│   └── ui/                  # Rendering
+│       ├── mod.rs           #   draw() dispatcher + insta test
+│       ├── components/      #   theme_list, preview_pane, search_bar, status_bar
+│       ├── screens/         #   main_screen, immersive_screen
+│       ├── overlays/        #   help, confirm, revert, message
+│       └── utilities/       #   ansi (ansi_to_text), layout (centered_rect)
 ├── .github/workflows/
-│   └── release.yml      # CI/CD for cross-platform releases
-├── Cargo.toml           # Dependencies and build config
-├── install.sh           # Curl installer script
-├── analysis.md          # Initial project analysis
-└── DOCUMENTATION.md     # This file
+│   └── release.yml          # CI/CD for cross-platform releases
+├── Cargo.toml               # Dependencies and build config
+├── install.sh               # Curl installer script
+└── DOCUMENTATION.md         # This file
 ```
 
 ### Building
@@ -565,16 +579,6 @@ cargo run
 cargo run --release
 ```
 
-### Binary size
-
-The release binary is ~4.2 MB after stripping. Breakdown:
-- Rust standard library + tokio runtime: ~2 MB
-- ratatui + crossterm: ~500 KB
-- reqwest + TLS: ~800 KB
-- nucleo: ~200 KB
-- ansi-to-tui + rand: ~200 KB
-- Application code: ~100 KB
-
 ---
 
 ## 9. CI/CD
@@ -583,7 +587,7 @@ The release binary is ~4.2 MB after stripping. Breakdown:
 
 File: `.github/workflows/release.yml`
 
-**Trigger:** Push a tag matching `v*` (e.g., `git tag v0.2.0 && git push --tags`)
+**Trigger:** Push a tag matching `v*` (e.g., `git tag v0.4.2 && git push --tags`)
 
 **Build matrix:**
 
@@ -595,19 +599,19 @@ File: `.github/workflows/release.yml`
 | `aarch64-apple-darwin` | macos-latest | `posh-tui-aarch64-macos` | cargo |
 | `x86_64-pc-windows-msvc` | windows-latest | `posh-tui-x86_64-windows.exe` | cargo |
 
-> The `aarch64-unknown-linux-gnu` target uses [`cross`](https://github.com/cross-rs/cross) for Docker-based cross-compilation. The `cross: true` matrix flag triggers its installation and use automatically.
+> The `aarch64-unknown-linux-gnu` target uses [`cross`](https://github.com/cross-rs/cross) for Docker-based cross-compilation.
 
 **Pipeline:**
 1. Checkout → Rust toolchain → Cache dependencies
 2. Build release binary for each target
 3. Upload artifacts
-4. Create GitHub release with auto-generated notes
-5. Attach all platform binaries
+4. Download artifacts → Generate SHA256 checksums → Extract changelog notes
+5. Create GitHub release with binaries + checksums + release notes
 
 ### Releasing
 
 ```bash
-git tag v0.2.0
+git tag v0.4.2
 git push --tags
 ```
 
@@ -622,7 +626,7 @@ The CI will automatically build and attach binaries to a new GitHub release.
 | `ratatui` | 0.29 | TUI framework — layout, widgets, rendering |
 | `crossterm` | 0.28 | Terminal raw mode, alternate screen, keyboard events |
 | `tokio` | 1 (full) | Async runtime, process spawning, channels |
-| `reqwest` | 0.12 (json) | HTTP client for GitHub API |
+| `reqwest` | 0.12 (json, rustls-tls) | HTTP client for GitHub API |
 | `serde` | 1 (derive) | Serialization/deserialization |
 | `serde_json` | 1 | JSON parsing for GitHub API and theme cache |
 | `toml` | 0.8 | TOML config file parsing |
@@ -631,6 +635,15 @@ The CI will automatically build and attach binaries to a new GitHub release.
 | `ansi-to-tui` | 7 | ANSI escape sequence parsing to ratatui Text |
 | `rand` | 0.9 | Random theme selection |
 | `clap` | 4.5 | CLI argument parsing and shell completion generation |
+| `clap_complete` | 4.5 | Shell completion generation |
+| `thiserror` | 1 | Ergonomic error type derive macros |
+
+**Dev-dependencies:**
+
+| Crate | Version | Purpose |
+|-------|---------|---------|
+| `tempfile` | 3.10 | Temporary directories for shell integration tests |
+| `wiremock` | 0.6.5 | HTTP mocking for GitHub API tests |
 | `insta` | 1.39 | UI snapshot testing |
 
 ---
@@ -643,9 +656,21 @@ The CI will automatically build and attach binaries to a new GitHub release.
 cargo test
 ```
 
+### Linting
+
+```bash
+cargo clippy -- -D warnings
+```
+
+### Snapshot review
+
+```bash
+cargo insta review
+```
+
 ### Test coverage — 32 tests total
 
-#### `shell.rs` — 14 tests (rc-file patching logic)
+#### `core/shell.rs` — 15 tests (rc-file patching logic)
 
 **`replace_managed_block` (3 tests):**
 - Replaces existing managed block with new content
@@ -669,7 +694,10 @@ cargo test
 - Generates correct backup path for `.zshrc`
 - Generates correct backup path for fish config
 
-#### `config.rs` — 4 tests
+**`e2e_apply_and_undo` (1 test):**
+- End-to-end apply → undo cycle with real temp directory
+
+#### `core/config.rs` — 4 tests
 
 - `test_defaults_on_missing_file` — `Config::load()` returns sensible defaults without panicking
 - `test_push_recent_dedup` — pushing the same theme name twice results in one entry
@@ -683,18 +711,30 @@ cargo test
 - `test_case_insensitive` — "CATPPUCCIN" matches "catppuccin"
 - `test_empty_query_returns_all` — empty query returns all theme names
 
-#### `app.rs` — 6 tests (async, `#[tokio::test]`)
+#### `app/theme_state.rs` — 3 tests (async, `#[tokio::test]`)
 
-- `test_zoom_in_bounded` — `zoom_in()` never exceeds maximum zoom factor
-- `test_zoom_out_bounded` — `zoom_out()` never goes below minimum zoom factor
-- `test_zoom_reset` — `zoom_reset()` restores `zoom_factor` to `1.0`
 - `test_toggle_favourite_adds_and_removes` — double-toggle leaves favourites empty
 - `test_move_up_at_top_clamps` — `move_up()` at index 0 stays at 0
 - `test_visible_themes_favs_filter` — `show_favs=true` returns only favourited themes
 
+#### `app/preview_state.rs` — 3 tests (async, `#[tokio::test]`)
+
+- `test_zoom_in_bounded` — `zoom_in()` never exceeds maximum zoom factor
+- `test_zoom_out_bounded` — `zoom_out()` never goes below minimum zoom factor
+- `test_zoom_reset` — `zoom_reset()` restores `zoom_factor` to `1.0`
+
+#### `core/themes.rs` — 2 tests (async, `#[tokio::test]`, wiremock)
+
+- `test_fetch_theme_list_success_after_2_errors` — mock returns 500 twice then 200
+- `test_fetch_theme_list_exhaustion` — all 500s, asserts error returned
+
+#### `ui/mod.rs` — 1 test (async, `#[tokio::test]`, insta snapshot)
+
+- `test_ui_snapshot` — renders 80×24 TUI and compares against committed snapshot
+
 ### What's still not tested (future additions)
 
-- Integration tests for `apply_theme()` end-to-end (requires `tempdir`)
-- `themes.rs` fetch/download with mocked HTTP (`wiremock` or `httpmock`)
-- Snapshot tests for ANSI rendering output
+- `input/` handlers (keybinding dispatch, mouse handling)
+- `preview.rs` (PreviewWorker subprocess)
+- Integration tests for `do_apply()` / `do_undo()` end-to-end
 - `main.rs` event loop (requires terminal mock)

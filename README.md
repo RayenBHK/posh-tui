@@ -161,6 +161,7 @@ Open a new terminal to see the theme. Press `u` to undo at any time.
 - [nucleo](https://github.com/helix-editor/nucleo) — fuzzy search
 - [serde](https://serde.rs) — serialisation
 - [clap](https://docs.rs/clap) — CLI argument parsing
+- [thiserror](https://docs.rs/thiserror) — ergonomic error types
 - [insta](https://insta.rs) — UI snapshot testing
 
 ---

@@ -1,4 +1,4 @@
-use crate::error::{PoshError, Result};
+use crate::core::error::{PoshError, Result};
 use std::path::{Path, PathBuf};
 
 const MARKER_START: &str = "# posh-tui:start";
@@ -266,14 +266,6 @@ fn remove_all_omp_lines(contents: &str) -> (String, usize) {
 }
 
 fn which_omp() -> String {
-    // try to resolve the full path of oh-my-posh binary
-    let candidates = [
-        "/home/pavilion/.local/bin/oh-my-posh", // fallback hardcode
-        "/usr/local/bin/oh-my-posh",
-        "/usr/bin/oh-my-posh",
-    ];
-
-    // prefer `which` output — works for any user
     if let Ok(out) = std::process::Command::new("which")
         .arg("oh-my-posh")
         .output()
@@ -284,14 +276,6 @@ fn which_omp() -> String {
         }
     }
 
-    // fallback to known candidates
-    for c in &candidates {
-        if std::path::Path::new(c).exists() {
-            return c.to_string();
-        }
-    }
-
-    // last resort — hope it's in PATH by the time shell loads
     "oh-my-posh".to_string()
 }
 

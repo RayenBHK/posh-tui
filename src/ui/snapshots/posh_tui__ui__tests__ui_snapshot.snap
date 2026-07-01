@@ -1,11 +1,11 @@
 ---
-source: src/ui.rs
+source: src/ui/mod.rs
 expression: content
 ---
 ┌ posh-tui   applied: M365Princess ────────────────────────────────────────────┐
 │ type / to search...                                                          │
 └──────────────────────────────────────────────────────────────────────────────┘
-┌ themes (2) ────────┐┌ preview — theme1  zoom 200% ───────────────────────────┐
+┌ themes (2) ────────┐┌ preview — theme1 ──────────────────────────────────────┐
 │▶    theme1         ││  press Space to preview  ·  p for immersive mode       │
 │     theme2         ││                                                        │
 │                    ││                                                        │

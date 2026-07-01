@@ -1,4 +1,4 @@
-use crate::error::Result;
+use crate::core::error::Result;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
@@ -68,7 +68,7 @@ async fn render_preview(path: &PathBuf, width: u16) -> Result<String> {
             .output(),
     )
     .await
-    .map_err(|_| crate::error::PoshError::Preview("oh-my-posh timed out after 5s".into()))?
+    .map_err(|_| crate::core::error::PoshError::Preview("oh-my-posh timed out after 5s".into()))?
     ?;
 
     let raw = String::from_utf8_lossy(&output.stdout).to_string();

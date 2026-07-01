@@ -1,4 +1,4 @@
-use crate::error::{PoshError, Result};
+use crate::core::error::{PoshError, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::PathBuf;

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-07-01
+
+### Changed
+- Decomposed `app.rs` (832 lines) into `src/app/` module with `ThemeState`, `PreviewState`, `SearchState`, and `ImmersiveState` sub-states using nested pub fields
+- Split `ui.rs` (903 lines) into `src/ui/` with `components/`, `screens/`, `overlays/`, and `utilities/` sub-modules
+- Extracted input handlers from `main.rs` (323 lines) into `src/input/` module (`normal`, `search`, `immersive`, `overlay`); `main.rs` reduced to 168 lines
+- Moved `config.rs`, `themes.rs`, `shell.rs`, `error.rs` into `src/core/` directory
+- Migrated `PoshError` from hand-written `Display`/`From` impls to `thiserror` derive macros
+- Cleaned hardcoded machine-specific path in `shell.rs::which_omp()`
+- Insta snapshot test now forces `zoom_factor = 1.0` for deterministic CI output
+
+### Added
+- `thiserror = "1"` dependency for ergonomic error types
+
 ## [0.4.1] - 2026-06-30
 
 ### Added

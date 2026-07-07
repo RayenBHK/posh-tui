@@ -23,6 +23,9 @@ pub enum PoshError {
 
     #[error("Config error: {0}")]
     Config(String),
+
+    #[error("Rate limit: {0}")]
+    RateLimit(String),
 }
 
 pub type Result<T> = std::result::Result<T, PoshError>;

@@ -42,16 +42,24 @@ pub(super) async fn handle_normal(app: &mut App, key: KeyCode, mods: KeyModifier
         KeyCode::Char('F') => {
             app.theme_state.show_favs = !app.theme_state.show_favs;
             app.theme_state.show_recent = false;
+            // Reset selection — the new visible list may be shorter than the old index.
+            app.theme_state.selected = 0;
+            app.preview_state.scroll_offset = 0;
             app.preview_state.preview_timer = 0;
         }
         KeyCode::Char('R') => {
             app.theme_state.show_recent = !app.theme_state.show_recent;
             app.theme_state.show_favs = false;
+            // Reset selection — the new visible list may be shorter than the old index.
+            app.theme_state.selected = 0;
+            app.preview_state.scroll_offset = 0;
             app.preview_state.preview_timer = 0;
         }
         KeyCode::Char('x') => app.random_theme(),
         KeyCode::Char('r') => {
             app.start_refresh();
+            // Reset selection so when the refreshed list arrives index 0 is selected.
+            app.theme_state.selected = 0;
             app.preview_state.preview_timer = 0;
         }
 

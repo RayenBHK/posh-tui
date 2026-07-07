@@ -1,4 +1,9 @@
 use crate::preview::PreviewWorker;
+// NOTE: This creates an intentional intra-crate coupling: `app` → `ui::ansi_to_text`.
+// The function is used here to keep ANSI parsing in the state layer (Model in MUV),
+// so that `ui/` only renders pre-parsed `Text<'static>` and never does expensive I/O.
+// Rust allows this cycle within a single crate. Future refactor: extract `ansi_to_text`
+// to `core/` or expose it via a standalone crate to eliminate the architectural coupling.
 use crate::ui::ansi_to_text;
 use crossterm::ExecutableCommand;
 
@@ -142,30 +147,11 @@ impl super::App {
 #[cfg(test)]
 mod tests {
     use super::super::App;
-    use crate::core::themes::Theme;
     use std::path::PathBuf;
 
-    fn dummy_themes() -> Vec<Theme> {
-        vec![
-            Theme {
-                name: "catppuccin".into(),
-                filename: "catppuccin.omp.json".into(),
-                raw_url: "http://example.com/1".into(),
-                local: None,
-            },
-            Theme {
-                name: "tokyo-night".into(),
-                filename: "tokyo-night.omp.json".into(),
-                raw_url: "http://example.com/2".into(),
-                local: None,
-            },
-            Theme {
-                name: "agnoster".into(),
-                filename: "agnoster.omp.json".into(),
-                raw_url: "http://example.com/3".into(),
-                local: None,
-            },
-        ]
+    /// Delegate to the shared helper in app/mod.rs
+    fn dummy_themes() -> Vec<crate::core::themes::Theme> {
+        super::super::dummy_themes()
     }
 
     #[tokio::test]

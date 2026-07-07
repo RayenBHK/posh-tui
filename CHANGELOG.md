@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Snapshot test `test_ui_snapshot` was non-deterministic: forced `hide_font_warning = true` so the Nerd Font banner never appears in the snapshot output
+- Snapshot test was calling `app.save_config()` which overwrote the developer's real `~/.config/posh-tui/config.toml`; removed the call
+- Download and preview errors were rendered as an empty preview pane instead of showing the error text; the preview pane now detects error-prefixed output and renders it in red
+- `preview.rs` worker message had duplicate `"preview error: Preview error: …"` prefix; now errors from `PoshError::Display` are written verbatim
+- Removed dead `PreviewMsg::Quit` variant (never sent, was suppressed with `#[allow(dead_code)]`)
+- GitHub API rate limits (403 Forbidden, 429 Too Many Requests) were not explicitly detected in `themes.rs`, contradicting the v0.4.1 changelog entry; now returns `PoshError::RateLimit` with a user-readable message
+- Dead `_title` local variable in `ui/components/search_bar.rs` (leftover from module split) removed
+- `F` (toggle favourites filter) and `R` (toggle recent filter) no longer leave a stale out-of-bounds `selected` index when switching to a shorter visible list
+- `r` (refresh) now resets `selected` to 0 so the newly-loaded list starts at the top
+
+### Added
+- `PoshError::RateLimit(String)` variant for explicit GitHub API rate-limit errors
+- `.github/workflows/ci.yml` — CI gate that runs `cargo clippy -- -D warnings` and `cargo test` on every push to `main` and on pull requests
+- Shared `dummy_themes()` test helper in `app/mod.rs`; `theme_state::tests` and `preview_state::tests` now delegate to it instead of duplicating
+
+### Changed
+- `core/mod.rs` now only declares modules (`pub mod`); removed the four glob `pub use X::*` re-exports that were shims for the old flat structure
+- `main.rs` now uses fully-qualified `crate::core::*` paths instead of the `pub use crate::core::*` glob shim
+- Documented the `app` → `ui::ansi_to_text` intra-crate coupling in `preview_state.rs` with a future-refactor note
+
 ## [0.4.2] - 2026-07-01
 
 ### Changed

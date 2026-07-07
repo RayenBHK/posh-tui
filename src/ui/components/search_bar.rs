@@ -19,11 +19,6 @@ pub(crate) fn draw_search(frame: &mut Frame, app: &crate::app::App, area: Rect) 
         None => String::new(),
     };
 
-    let _title = if app.theme_state.show_favs {
-        format!(" ★ favourites{fav_indicator} ")
-    } else {
-        format!(" posh-tui{fav_indicator}  {applied_label}")
-    };
 
     let query = if app.mode == Mode::Search {
         format!("/ {}_", app.search_state.search_query)

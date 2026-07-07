@@ -5,15 +5,13 @@ mod preview;
 mod search;
 mod ui;
 
-pub use crate::core::*;
-
 use app::{App, Mode};
 use clap::{CommandFactory, Parser};
 use clap_complete::{generate, Shell as CompletionShell};
 use crossterm::{
-event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event,
-},
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event,
+    },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -23,9 +21,10 @@ use tokio::sync::mpsc;
 
 #[derive(Debug)]
 pub enum AppEvent {
-    ThemesLoaded(Vec<themes::Theme>),
+    ThemesLoaded(Vec<crate::core::themes::Theme>),
     ThemeLoadError(String),
 }
+
 
 #[derive(Parser, Debug)]
 #[command(name = "posh-tui", author, version, about, long_about = None)]
@@ -40,7 +39,7 @@ pub struct Cli {
 }
 
 #[tokio::main]
-async fn main() -> error::Result<()> {
+async fn main() -> crate::core::error::Result<()> {
     let cli = Cli::parse();
 
     if let Some(shell) = cli.generate_completions {
@@ -69,14 +68,14 @@ async fn main() -> error::Result<()> {
     let (event_tx, mut event_rx) = mpsc::channel::<AppEvent>(4);
     let cache_dir_clone = cache_dir.clone();
     tokio::spawn(async move {
-        match themes::fetch_theme_list().await {
+        match crate::core::themes::fetch_theme_list().await {
             Ok(list) => {
-                themes::save_theme_list_cache(&list, &cache_dir_clone);
+                crate::core::themes::save_theme_list_cache(&list, &cache_dir_clone);
                 let _ = event_tx.send(AppEvent::ThemesLoaded(list)).await;
             }
             Err(_) => {
                 // network failed — try cached theme list
-                if let Some(cached) = themes::load_cached_theme_list(&cache_dir_clone) {
+                if let Some(cached) = crate::core::themes::load_cached_theme_list(&cache_dir_clone) {
                     let _ = event_tx.send(AppEvent::ThemesLoaded(cached)).await;
                 } else {
                     let _ = event_tx.send(AppEvent::ThemeLoadError(
@@ -112,7 +111,7 @@ async fn run_app(
     term: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut App,
     event_rx: &mut mpsc::Receiver<AppEvent>,
-) -> error::Result<()> {
+) -> crate::core::error::Result<()> {
     loop {
         // check for background events (theme load completing)
         if let Ok(evt) = event_rx.try_recv() {

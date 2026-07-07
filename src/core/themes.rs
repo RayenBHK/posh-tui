@@ -56,13 +56,19 @@ async fn try_fetch_theme_list() -> Result<Vec<Theme>> {
         std::env::var("GITHUB_API_URL").unwrap_or_else(|_| "https://api.github.com".to_string());
     let url = format!("{api_url}/repos/JanDeDobbeleer/oh-my-posh/contents/themes");
 
-    let entries: Vec<GithubEntry> = client
-        .get(&url)
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?;
+    let response = client.get(&url).send().await?;
+
+    // Explicitly handle GitHub API rate limits before falling through to the
+    // generic retry logic — 403 (Forbidden) and 429 (Too Many Requests) both
+    // indicate rate limiting and should give the user a clear error message.
+    let status = response.status();
+    if status == reqwest::StatusCode::FORBIDDEN || status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        return Err(crate::core::error::PoshError::RateLimit(
+            "GitHub API rate limit exceeded — wait a minute and press r to retry".into(),
+        ));
+    }
+
+    let entries: Vec<GithubEntry> = response.error_for_status()?.json().await?;
 
     let themes = entries
         .into_iter()

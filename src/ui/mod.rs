@@ -44,7 +44,6 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::App;
     use crate::core::themes::Theme;
     use ratatui::{backend::TestBackend, Terminal};
     use std::path::PathBuf;
@@ -71,7 +70,11 @@ mod tests {
         // Force deterministic zoom so this test does not depend on
         // whatever zoom_factor happens to be persisted on disk.
         app.preview_state.zoom_factor = 1.0;
-        app.save_config();
+        // Force font warning hidden so the Nerd Font banner never appears —
+        // avoids non-determinism caused by the developer's local config flag.
+        app.hide_font_warning = true;
+        // NOTE: do NOT call app.save_config() here — that would clobber the
+        // developer's real ~/.config/posh-tui/config.toml with test values.
 
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();

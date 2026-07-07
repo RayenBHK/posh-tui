@@ -126,27 +126,9 @@ mod tests {
     use crate::core::themes::Theme;
     use std::path::PathBuf;
 
+    /// Delegate to the shared helper in app/mod.rs
     fn dummy_themes() -> Vec<Theme> {
-        vec![
-            Theme {
-                name: "catppuccin".into(),
-                filename: "catppuccin.omp.json".into(),
-                raw_url: "http://example.com/1".into(),
-                local: None,
-            },
-            Theme {
-                name: "tokyo-night".into(),
-                filename: "tokyo-night.omp.json".into(),
-                raw_url: "http://example.com/2".into(),
-                local: None,
-            },
-            Theme {
-                name: "agnoster".into(),
-                filename: "agnoster.omp.json".into(),
-                raw_url: "http://example.com/3".into(),
-                local: None,
-            },
-        ]
+        super::super::dummy_themes()
     }
 
     #[tokio::test]

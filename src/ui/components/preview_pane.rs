@@ -29,6 +29,23 @@ pub(crate) fn draw_preview(frame: &mut Frame, app: &crate::app::App, area: Rect)
         return;
     }
 
+    // Errors from download_theme() or the preview worker are written into
+    // preview_output as plain strings starting with "  download error:" or
+    // "  preview error:". Render them prominently so the user knows what went wrong.
+    let is_error = app.preview_state.preview_output.trim_start().starts_with("download error:")
+        || app.preview_state.preview_output.trim_start().starts_with("preview error:");
+
+    if is_error {
+        let err_text = app.preview_state.preview_output.clone();
+        frame.render_widget(
+            Paragraph::new(err_text)
+                .style(Style::default().fg(Color::Red))
+                .wrap(Wrap { trim: false }),
+            inner,
+        );
+        return;
+    }
+
     if app.preview_state.preview_output.is_empty() {
         let hint = Paragraph::new(Line::from(vec![
             Span::styled("  press ", Style::default().fg(Color::DarkGray)),

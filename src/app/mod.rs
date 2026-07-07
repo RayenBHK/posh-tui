@@ -332,3 +332,29 @@ impl App {
         }
     }
 }
+
+/// Shared test helper — creates a deterministic set of three themes.
+/// Used by theme_state::tests and preview_state::tests to avoid duplication.
+#[cfg(test)]
+pub(crate) fn dummy_themes() -> Vec<crate::core::themes::Theme> {
+    vec![
+        crate::core::themes::Theme {
+            name: "catppuccin".into(),
+            filename: "catppuccin.omp.json".into(),
+            raw_url: "http://example.com/1".into(),
+            local: None,
+        },
+        crate::core::themes::Theme {
+            name: "tokyo-night".into(),
+            filename: "tokyo-night.omp.json".into(),
+            raw_url: "http://example.com/2".into(),
+            local: None,
+        },
+        crate::core::themes::Theme {
+            name: "agnoster".into(),
+            filename: "agnoster.omp.json".into(),
+            raw_url: "http://example.com/3".into(),
+            local: None,
+        },
+    ]
+}

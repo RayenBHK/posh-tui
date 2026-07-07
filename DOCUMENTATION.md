@@ -451,13 +451,20 @@ recent = [
 
 ### Cache locations
 
-```
-~/.cache/posh-tui/
-├── themes/                    # Downloaded .omp.json files
-│   ├── catppuccin.omp.json
-│   ├── tokyo-night.omp.json
-│   └── ...
-└── themes_cache.json          # Cached theme list for offline use
+```mermaid
+graph LR
+    CacheDir["~/.cache/posh-tui/"]
+    ThemesDir["themes/ (Downloaded .omp.json files)"]
+    ThemesCache["themes_cache.json (Cached list for offline use)"]
+    Catppuccin["catppuccin.omp.json"]
+    TokyoNight["tokyo-night.omp.json"]
+    Dots["..."]
+
+    CacheDir --> ThemesDir
+    CacheDir --> ThemesCache
+    ThemesDir --> Catppuccin
+    ThemesDir --> TokyoNight
+    ThemesDir --> Dots
 ```
 
 ### Shell rc file patching
@@ -525,41 +532,86 @@ The app opens instantly. Themes load from GitHub in the background with a spinne
 
 ### Project structure
 
-```
-posh-tui/
-├── src/
-│   ├── main.rs              # Entry point, event loop, CLI
-│   ├── preview.rs           # Async oh-my-posh worker
-│   ├── search.rs            # Nucleo fuzzy search
-│   ├── app/                 # State model (sub-state composition)
-│   │   ├── mod.rs           #   App struct, Mode, ImmLine, ImmKind, orchestration
-│   │   ├── theme_state.rs   #   Theme list + navigation
-│   │   ├── preview_state.rs #   Preview + zoom + scroll
-│   │   ├── search_state.rs  #   Search query + fuzzy
-│   │   └── immersive_state.rs #  Immersive mode + fake shell
-│   ├── core/                # Domain logic
-│   │   ├── mod.rs           #   Re-exports
-│   │   ├── config.rs        #   TOML config persistence
-│   │   ├── error.rs         #   PoshError (thiserror)
-│   │   ├── shell.rs         #   Shell detection, rc-file patching
-│   │   └── themes.rs        #   GitHub API, cache, download
-│   ├── input/               # Event handling
-│   │   ├── mod.rs           #   Key/mouse dispatcher
-│   │   ├── normal.rs        #   Normal mode keybindings
-│   │   ├── search.rs        #   Search mode keybindings
-│   │   ├── immersive.rs     #   Immersive mode keybindings
-│   │   └── overlay.rs       #   Overlay mode keybindings
-│   └── ui/                  # Rendering
-│       ├── mod.rs           #   draw() dispatcher + insta test
-│       ├── components/      #   theme_list, preview_pane, search_bar, status_bar
-│       ├── screens/         #   main_screen, immersive_screen
-│       ├── overlays/        #   help, confirm, revert, message
-│       └── utilities/       #   ansi (ansi_to_text), layout (centered_rect)
-├── .github/workflows/
-│   └── release.yml          # CI/CD for cross-platform releases
-├── Cargo.toml               # Dependencies and build config
-├── install.sh               # Curl installer script
-└── DOCUMENTATION.md         # This file
+```mermaid
+graph TD
+    Root["posh-tui/"]
+    Src["src/"]
+    Github[".github/workflows/"]
+    Release["release.yml (CI/CD)"]
+    Cargo["Cargo.toml (Dependencies/build)"]
+    Install["install.sh (Curl installer)"]
+    Doc["DOCUMENTATION.md"]
+
+    Main["main.rs (Entry point/CLI)"]
+    Preview["preview.rs (Async worker)"]
+    Search["search.rs (Fuzzy search)"]
+
+    App["app/ (State model)"]
+    AppMod["mod.rs"]
+    ThemeState["theme_state.rs"]
+    PreviewState["preview_state.rs"]
+    SearchState["search_state.rs"]
+    ImmState["immersive_state.rs"]
+
+    Core["core/ (Domain logic)"]
+    CoreMod["mod.rs"]
+    Config["config.rs"]
+    Error["error.rs"]
+    Shell["shell.rs"]
+    Themes["themes.rs"]
+
+    Input["input/ (Event handling)"]
+    InputMod["mod.rs"]
+    Normal["normal.rs"]
+    SearchInput["search.rs"]
+    ImmInput["immersive.rs"]
+    Overlay["overlay.rs"]
+
+    Ui["ui/ (Rendering)"]
+    UiMod["mod.rs"]
+    UiComp["components/"]
+    UiScreens["screens/"]
+    UiOverlays["overlays/"]
+    UiUtil["utilities/"]
+
+    Root --> Src
+    Root --> Github
+    Root --> Cargo
+    Root --> Install
+    Root --> Doc
+    Github --> Release
+
+    Src --> Main
+    Src --> Preview
+    Src --> Search
+    Src --> App
+    Src --> Core
+    Src --> Input
+    Src --> Ui
+
+    App --> AppMod
+    App --> ThemeState
+    App --> PreviewState
+    App --> SearchState
+    App --> ImmState
+
+    Core --> CoreMod
+    Core --> Config
+    Core --> Error
+    Core --> Shell
+    Core --> Themes
+
+    Input --> InputMod
+    Input --> Normal
+    Input --> SearchInput
+    Input --> ImmInput
+    Input --> Overlay
+
+    Ui --> UiMod
+    Ui --> UiComp
+    Ui --> UiScreens
+    Ui --> UiOverlays
+    Ui --> UiUtil
 ```
 
 ### Building

@@ -6,8 +6,6 @@ use tokio::sync::{mpsc, Mutex};
 #[derive(Debug)]
 pub enum PreviewMsg {
     Load(PathBuf, u16), // path + terminal width
-    #[allow(dead_code)]
-    Quit,
 }
 
 pub struct PreviewWorker {
@@ -23,17 +21,15 @@ impl PreviewWorker {
 
         tokio::spawn(async move {
             while let Some(msg) = rx.recv().await {
-                match msg {
-                    PreviewMsg::Quit => break,
-                    PreviewMsg::Load(path, width) => {
-                        let result = render_preview(&path, width).await;
-                        let mut lock = output_clone.lock().await;
-                        *lock = Some(match result {
-                            Ok(s) => s,
-                            Err(e) => format!("  preview error: {e}"),
-                        });
-                    }
-                }
+                let PreviewMsg::Load(path, width) = msg;
+                let result = render_preview(&path, width).await;
+                let mut lock = output_clone.lock().await;
+                // PoshError Display already includes a readable label, so we
+                // just format the error directly — avoids "preview error: Preview error: …"
+                *lock = Some(match result {
+                    Ok(s) => s,
+                    Err(e) => format!("  preview error: {e}"),
+                });
             }
         });
 

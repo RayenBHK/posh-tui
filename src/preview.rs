@@ -61,6 +61,14 @@ async fn render_preview(path: &PathBuf, width: u16) -> Result<String> {
             .env("COLORTERM", "truecolor")
             .env("COLUMNS", &cols)
             .env("LINES", "10")
+            // oh-my-posh caches the active config path in /tmp/bash.<POSH_SESSION_ID>.omp.cache.
+            // When posh-tui inherits the parent shell's session ID, every `print primary --config X`
+            // call silently uses the cached path (the last applied theme) instead of X.
+            // Clearing the session ID forces a fresh session with no config cache.
+            .env_remove("POSH_SESSION_ID")
+            // Also clear POSH_THEME in case the parent shell has it exported — it would
+            // override --config in some oh-my-posh versions.
+            .env_remove("POSH_THEME")
             .output(),
     )
     .await

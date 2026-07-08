@@ -73,6 +73,9 @@ mod tests {
         // Force font warning hidden so the Nerd Font banner never appears —
         // avoids non-determinism caused by the developer's local config flag.
         app.hide_font_warning = true;
+        // Clear last_applied so the search bar title is deterministic regardless of
+        // which theme the developer has most recently applied in their real config.
+        app.theme_state.last_applied = None;
         // NOTE: do NOT call app.save_config() here — that would clobber the
         // developer's real ~/.config/posh-tui/config.toml with test values.
 
